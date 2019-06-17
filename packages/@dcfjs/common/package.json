@@ -1,0 +1,15 @@
+{
+  "name": "@dcfjs/common",
+  "version": "1.0.0",
+  "main": "index.js",
+  "repository": "git@github.com:dcfjs/dcf.git",
+  "author": "dengyun <dengyun@meideng.net>",
+  "license": "MIT",
+  "dependencies": {
+    "ast-types": "^0.13.1",
+    "babylon": "^6.18.0",
+    "pirates": "^4.0.1",
+    "recast": "^0.18.1",
+    "tslib": "^1.9.3"
+  }
+}

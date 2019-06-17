@@ -1,0 +1,15 @@
+{
+  "name": "@dcfjs/worker",
+  "version": "1.0.0",
+  "main": "index.js",
+  "repository": "git@github.com:dcfjs/dcf.git",
+  "author": "dengyun <dengyun@meideng.net>",
+  "license": "MIT",
+  "bin": {
+    "dcf-worker": "./cli.js"
+  },
+  "dependencies": {
+    "tslib": "^1.9.3",
+    "@dcfjs/common": "1.0.0"
+  }
+}
