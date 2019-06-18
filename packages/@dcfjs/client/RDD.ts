@@ -11,7 +11,11 @@ export class RDD<T> {
   protected constructor(context: Context) {
     this._context = context;
   }
-  getFunc(): [number, PartitionFunc<T[]>] {
+  getFunc(): PartitionFunc<T[]> {
+    throw new Error('Must be overrided.');
+  }
+
+  getNumPartitions(): number {
     throw new Error('Must be overrided.');
   }
 
@@ -20,13 +24,15 @@ export class RDD<T> {
   }
 
   collect(): Promise<T[]> {
-    const [numPartitions, partitionFunc] = this.getFunc();
+    const numPartitions = this.getNumPartitions();
+    const partitionFunc = this.getFunc();
 
     return this._context.execute(numPartitions, partitionFunc, concatArrays);
   }
 
   count(): Promise<number> {
-    const [numPartitions, partitionFunc] = this.getFunc();
+    const numPartitions = this.getNumPartitions();
+    const partitionFunc = this.getFunc();
 
     return this._context.execute(
       numPartitions,
@@ -70,7 +76,11 @@ export class GeneratedRDD<T> extends RDD<T> {
     this._function = func;
   }
 
-  getFunc(): [number, PartitionFunc<T[]>] {
-    return [this._partitionCount, this._function!];
+  getFunc(): PartitionFunc<T[]> {
+    return this._function!;
+  }
+
+  getNumPartitions(): number {
+    return this._partitionCount;
   }
 }

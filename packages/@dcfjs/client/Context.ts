@@ -150,25 +150,27 @@ export class Context {
   }
 
   union<T>(...rdds: RDD<T>[]): RDD<T> {
+    const partitionCounts = rdds.map(v => v.getNumPartitions());
     const rddFuncs = rdds.map(v => v.getFunc());
-    const totalPartition = rddFuncs.map(v => v[0]).reduce((a, b) => a + b, 0);
+    const totalPartitions = partitionCounts.reduce((a, b) => a + b, 0);
 
     return new GeneratedRDD<T>(
       this,
-      totalPartition,
+      totalPartitions,
       sf.captureEnv(
         partitionId => {
-          for (let i = 0; i < rddFuncs.length; i++) {
-            if (partitionId < rddFuncs[i][0]) {
-              return rddFuncs[i][1](partitionId);
+          for (let i = 0; i < partitionCounts.length; i++) {
+            if (partitionId < partitionCounts[i]) {
+              return rddFuncs[i](partitionId);
             }
-            partitionId -= rddFuncs[i][0];
+            partitionId -= partitionCounts[i];
           }
-          // `partitionId` should be less than totalPartition.
+          // `partitionId` should be less than totalPartitions.
           // so it should not reach here.
           throw new Error('Internal error.');
         },
         {
+          partitionCounts,
           rddFuncs,
         },
       ),
