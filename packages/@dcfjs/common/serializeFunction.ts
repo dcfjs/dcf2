@@ -148,7 +148,7 @@ return __wrap(${f.source})`,
   for (let i = 0; i < f.args.length; i++) {
     __env[f.args[i]] = f.values[i];
   }
-  ret.__env = __env;
+  captureEnv(ret, __env);
   return ret;
 }
 
@@ -158,6 +158,12 @@ export function captureEnv<T extends (...args: any[]) => any>(
   },
   env: FunctionEnv,
 ) {
-  f.__env = env;
+  if (!f.__env) {
+    Object.defineProperty(f, '__env', {
+      value: env,
+      enumerable: false,
+      configurable: false,
+    });
+  }
   return f;
 }
