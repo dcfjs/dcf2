@@ -11,17 +11,17 @@ export async function releaseAll() {
   }
 }
 
-export function waitForExitSignal(log = true) {
+export function waitForExitSignal(debug: (...args: any) => void = console.log) {
   return new Promise(resolve => {
     async function stopServer() {
       process.removeListener('SIGINT', stopServer);
       process.removeListener('SIGTERM', stopServer);
       process.removeListener('SIGHUP', stopServer);
 
-      log && console.log('Shutting down...');
+      debug('Shutting down...');
       // stop timer & wakeup listener
       await releaseAll();
-      log && console.log('Bye.');
+      debug('Bye.');
       resolve();
     }
     process.on('SIGINT', stopServer);
@@ -29,6 +29,6 @@ export function waitForExitSignal(log = true) {
     process.on('SIGHUP', stopServer);
 
     // Waiting for signal:
-    log && console.log('Ready.');
+    debug('Ready.');
   });
 }

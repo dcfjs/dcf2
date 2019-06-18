@@ -23,7 +23,7 @@ function isPrime(v: number) {
   return true;
 }
 
-describe('DCF With local worker', () => {
+describe('Execute function With local worker', () => {
   let client: Client;
 
   before(async () => {
@@ -64,14 +64,12 @@ describe('DCF With local worker', () => {
         return counts.reduce((a, b) => a + b);
       }),
     );
-    console.log('Prime count in 0-999999 is(parallel): ', primeCount);
     let ret = 0;
     for (let i = 0; i < 999999; i++) {
       if (isPrime(i)) {
         ret++;
       }
     }
-    console.log('Prime count in 0-999999 is(local): ', ret);
     expect(primeCount).equals(ret);
   });
 });

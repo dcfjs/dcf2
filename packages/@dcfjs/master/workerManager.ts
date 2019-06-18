@@ -7,6 +7,10 @@ import {
   serializeFunction,
 } from '@dcfjs/common/serializeFunction';
 
+import debugFactory from 'debug';
+
+const debug = debugFactory('master:worker');
+
 const SECRET = process.env['WORKER_SECRET'] || 'NO_SECRET';
 
 const idGen = iterator();
@@ -37,7 +41,7 @@ class ClientWorker {
     client.session.on('close', () => {
       this.handleClose();
       // delete workers[id];
-      console.log(`Worker ${id} disconnected.`);
+      debug(`Worker ${id} disconnected.`);
     });
     this._addToWorkerList();
     this._becomeIdle();
@@ -139,7 +143,7 @@ export const handleRegisterWorker = async ({
     const id = idGen();
     await client.post('/init', { secret: SECRET, id });
     new ClientWorker(id, client);
-    console.log(`Worker ${id} connected from ${endpoint}.`);
+    debug(`Worker ${id} connected from ${endpoint}.`);
   } catch (e) {
     throw new Error('Failed to contact with worker:\n\t' + e.message);
   }

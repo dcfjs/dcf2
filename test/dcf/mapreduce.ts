@@ -21,7 +21,7 @@ function isPrime(v: number) {
   return true;
 }
 
-describe('DCF With local worker', () => {
+describe('MapReduce With local worker', () => {
   let dcc: Context;
 
   before(async () => {

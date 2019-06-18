@@ -59,8 +59,6 @@ export class Server extends EventEmitter {
         delete sess.id;
       });
     });
-
-    console.log('Listening at ', this.endpoint);
   }
 
   async close() {

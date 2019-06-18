@@ -7,6 +7,10 @@ import {
 import { createMasterServer } from './index';
 import { releaseAllClient } from './workerManager';
 
+import debugFactory from 'debug';
+
+const debug = debugFactory('master:cli');
+
 const PORT = (process.env['PORT'] as any | 0) || 9001;
 const HOST = process.env['HOST'] || 'localhost';
 
@@ -17,13 +21,14 @@ async function main() {
       port: PORT,
       host: HOST,
     });
+    debug('Listening at ', server.endpoint);
 
     // Create http2 server.
     autoRelease(() => server.close());
 
     autoRelease(releaseAllClient);
 
-    await waitForExitSignal();
+    await waitForExitSignal(debug);
   } finally {
     await releaseAll();
   }

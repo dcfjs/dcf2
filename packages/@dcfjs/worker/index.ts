@@ -11,6 +11,10 @@ import { deserializeFunction } from '../common/serializeFunction';
 import '@dcfjs/common/registerCaptureEnv';
 import { fork } from 'child_process';
 
+import debugFactory from 'debug';
+
+const debug = debugFactory('worker:cli');
+
 export async function registerWorker(
   masterEndpoint: string,
   endpoint: string,
@@ -45,7 +49,7 @@ export async function createWorkerServer(
 
       // Exit and restart if this session was closed.
       sess.on('close', () => {
-        console.log('Shutting down because of master session was closed.');
+        debug('Shutting down because of master session was closed.');
         process.emit('SIGINT', 'SIGINT');
       });
     },
@@ -63,7 +67,7 @@ export async function createWorkerServer(
   // Register worker.
   await registerWorker(masterEndpoint, server.endpoint, workerSecret);
 
-  console.log(`Worker ${workerId} registered.`);
+  debug(`Worker ${workerId} registered.`);
 
   return server;
 }
@@ -83,7 +87,7 @@ export async function createLocalWorker(masterEndpoint: string) {
   await new Promise((resolve, reject) => {
     cp.on('message', resolve);
     cp.on('exit', (code, signal) => {
-      console.log('Worker process exited: ', code, signal);
+      debug('Worker process exited: ', code, signal);
       reject(new Error('Child process exited.'));
     });
   });

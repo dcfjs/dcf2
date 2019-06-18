@@ -9,7 +9,9 @@
     "dcf-worker": "./cli.js"
   },
   "dependencies": {
-    "tslib": "^1.9.3",
-    "@dcfjs/common": "1.0.0"
+    "@dcfjs/common": "1.0.0",
+    "@types/debug": "^4.1.4",
+    "debug": "^4.1.1",
+    "tslib": "^1.9.3"
   }
 }

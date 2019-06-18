@@ -5,6 +5,9 @@ import {
   releaseAll,
 } from '@dcfjs/common/autoRelease';
 import { createWorkerServer } from '.';
+import debugFactory from 'debug';
+
+const debug = debugFactory('worker:cli');
 
 // default to random port.
 const PORT = (process.env['PORT'] as any | 0) || undefined;
@@ -26,6 +29,7 @@ async function main() {
       port: PORT,
       host: HOST,
     });
+    debug('Listening at ', server.endpoint);
 
     autoRelease(() => server.close());
 
@@ -33,7 +37,7 @@ async function main() {
       process.send('Ok');
     }
 
-    await waitForExitSignal();
+    await waitForExitSignal(debug);
   } finally {
     await releaseAll();
   }
