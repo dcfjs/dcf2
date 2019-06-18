@@ -14,7 +14,7 @@ class RequireModule {
   }
 }
 
-function serializeValue(v: any) {
+function serializeValue(v: any): any {
   if (typeof v === 'function') {
     return serializeFunction(v);
   }
