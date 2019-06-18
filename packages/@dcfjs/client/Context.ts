@@ -1,7 +1,8 @@
 import { WorkDispatcher } from '@dcfjs/master/workerManager';
 import { createClient, Client } from '@dcfjs/common/client';
 import { RDD, GeneratedRDD, PartitionFunc } from './RDD';
-import { captureEnv, serializeFunction } from '@dcfjs/common/serializeFunction';
+// import { captureEnv, serializeFunction } from '@dcfjs/common/serializeFunction';
+import sf = require('@dcfjs/common/serializeFunction');
 
 export interface ContextOption {
   defaultPartitions: number;
@@ -34,8 +35,8 @@ export class Context {
   ): Promise<T1> {
     return this._client.post<T1>(
       '/exec',
-      serializeFunction(
-        captureEnv(
+      sf.serializeFunction(
+        sf.captureEnv(
           async (dispatchWork: WorkDispatcher) => {
             const partitionResults = await Promise.all(
               new Array(numPartitions)
@@ -94,11 +95,10 @@ export class Context {
     return new GeneratedRDD<number>(
       this,
       numPartitions,
-      captureEnv(
+      sf.captureEnv(
         partitionId => {
           const { from, count } = args[partitionId];
-          // TODO: This is ugly.
-          return (global as any).__captureEnv(
+          return sf.captureEnv(
             () => {
               const ret = [];
               for (let i = 0; i < count; i++) {
@@ -109,7 +109,7 @@ export class Context {
             { from, count, step },
           );
         },
-        { step, args },
+        { step, args, sf: sf.requireModule('@dcfjs/common/serializeFunction') },
       ),
     );
   }

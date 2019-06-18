@@ -1,7 +1,7 @@
 import { WorkDispatcher } from '@dcfjs/master/workerManager';
 import { Context } from './Context';
 import concatArrays from '@dcfjs/common/concatArrays';
-import { captureEnv } from '@dcfjs/common/serializeFunction';
+import sf = require('@dcfjs/common/serializeFunction');
 
 export type ParallelTask = (dispachWorker: WorkDispatcher) => any;
 export type PartitionFunc<T> = (paritionId: number) => () => T;
@@ -26,11 +26,10 @@ export class RDD<T> {
 
     return this._context.execute(
       numPartitions,
-      captureEnv(
+      sf.captureEnv(
         partitionId => {
           const f = partitionFunc(partitionId);
-          // TODO: This is ugly.
-          return (global as any).__captureEnv(
+          return sf.captureEnv(
             () => {
               return f().length;
             },
@@ -39,6 +38,7 @@ export class RDD<T> {
         },
         {
           partitionFunc,
+          sf: sf.requireModule('@dcfjs/common/serializeFunction'),
         },
       ),
       v => v.reduce((a, b) => a + b, 0),
