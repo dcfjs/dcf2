@@ -6,6 +6,7 @@ const { deserialize, serialize } = require('v8');
 export type ServerHandler = (
   body: any | null,
   sess: http2.Http2Session,
+  stream: http2.ServerHttp2Stream,
 ) => any | Promise<any>;
 export type ServerHandlerMap = { [url: string]: ServerHandler };
 
@@ -108,6 +109,7 @@ export async function createServer(
     let body = null;
     const method = header[http2.constants.HTTP2_HEADER_METHOD];
     const path = header[http2.constants.HTTP2_HEADER_PATH] as string;
+    const handler = handlers[path];
     if (
       method === http2.constants.HTTP2_METHOD_OPTIONS ||
       method === http2.constants.HTTP2_METHOD_HEAD
@@ -119,7 +121,6 @@ export async function createServer(
       stream.end();
       return;
     }
-    const handler = handlers[path];
     if (!handler) {
       stream.respond({
         [http2.constants.HTTP2_HEADER_STATUS]:
@@ -144,7 +145,7 @@ export async function createServer(
       stream.end(e.message);
     }
     try {
-      let resp = await handler(body, stream.session);
+      let resp = await handler(body, stream.session, stream);
       stream.end(serialize(resp));
     } catch (e) {
       if (e instanceof ServerError) {
@@ -157,7 +158,7 @@ export async function createServer(
           [http2.constants.HTTP2_HEADER_STATUS]:
             http2.constants.HTTP_STATUS_INTERNAL_SERVER_ERROR,
         });
-        stream.end(e.message);
+        stream.end(e.stack + e.message);
       }
     }
   });
@@ -167,5 +168,25 @@ export async function createServer(
       resolve(new Server(server)),
     );
     server.on('error', reject);
+  });
+}
+
+export async function pushStream(
+  stream: http2.ServerHttp2Stream,
+  path: string,
+): Promise<http2.ServerHttp2Stream> {
+  return new Promise((resolve, reject) => {
+    stream.pushStream(
+      {
+        [http2.constants.HTTP2_HEADER_PATH]: path,
+      },
+      (err, pushStream) => {
+        if (err) {
+          reject(err);
+          return;
+        }
+        resolve(pushStream);
+      },
+    );
   });
 }

@@ -67,4 +67,8 @@ describe('MapReduce With local worker', () => {
         .collect(),
     ).deep.equals(await dcc.range(30).collect());
   });
+
+  it('Test a long task', async () => {
+    await dcc.range(0, 100000000, 1, 200).count();
+  }).timeout(60000);
 });

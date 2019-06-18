@@ -274,7 +274,11 @@ function hookCode(ast: any) {
   });
 }
 
-export function transformCode(code: string) {
+export function transformCode(code: string, filename: string) {
+  if (/@noCaptureEnv/.test(code)) {
+    return code;
+  }
+
   const ast = recast.parse(code, { parser });
   hookCode(ast);
 

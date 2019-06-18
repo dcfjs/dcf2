@@ -1,14 +1,22 @@
-import { WorkDispatcher } from '@dcfjs/master/workerManager';
+/**
+ * @noCaptureEnv
+ */
 import { createClient, Client } from '@dcfjs/common/client';
 import { RDD, GeneratedRDD, PartitionFunc } from './RDD';
-// import { captureEnv, serializeFunction } from '@dcfjs/common/serializeFunction';
+import * as http2 from 'http2';
 import sf = require('@dcfjs/common/serializeFunction');
+import { ExecTask } from '@dcfjs/master';
+import split = require('split');
+import * as ProgressBar from 'progress';
+const v8 = require('v8');
 
 export interface ContextOption {
+  showProgress: boolean;
   defaultPartitions: number;
 }
 
 const defaultOption: ContextOption = {
+  showProgress: !!process.stdout.isTTY,
   defaultPartitions: 4,
 };
 
@@ -22,6 +30,46 @@ export class Context {
       ...defaultOption,
       ...option,
     };
+
+    this._client.session.on('stream', (stream, header) => {
+      const path = header[http2.constants.HTTP2_HEADER_PATH];
+      switch (path) {
+        case '/progress': {
+          let progress: ProgressBar | null;
+
+          stream
+            .pipe(split())
+            .on('data', function(line) {
+              if (!line) {
+                return;
+              }
+              const [curr, total] = v8.deserialize(Buffer.from(line, 'base64'));
+              if (!progress) {
+                progress = new ProgressBar(
+                  `:percent [:bar] Partitions :current/:total :rate/s :etas`,
+                  {
+                    clear: true,
+                    curr,
+                    total,
+                  },
+                );
+              } else {
+                progress.tick();
+              }
+            })
+            .on('end', () => {
+              if (progress) {
+                progress.terminate();
+                progress = null;
+              }
+            });
+          break;
+        }
+        default: {
+          stream.close();
+        }
+      }
+    });
   }
 
   close(): Promise<void> {
@@ -33,22 +81,54 @@ export class Context {
     partitionFunc: PartitionFunc<T>,
     finalFunc: (v: T[]) => T1,
   ): Promise<T1> {
+    const { showProgress } = this._option;
+
     return this._client.post<T1>(
       '/exec',
       sf.serializeFunction(
         sf.captureEnv(
-          async (dispatchWork: WorkDispatcher) => {
+          (async (dispatchWork, createPushStream) => {
+            let sendProgress: (current: number, total: number) => void;
+            let stream: http2.ServerHttp2Stream | undefined;
+            if (showProgress) {
+              stream = await createPushStream('/progress');
+              sendProgress = (current, total) => {
+                stream!.write(
+                  (v8.serialize([current, total]) as Buffer).toString(
+                    'base64',
+                  ) + '\n',
+                );
+              };
+            } else {
+              sendProgress = () => {};
+            }
+
+            let current = 0;
+            sendProgress(0, numPartitions);
+            function tickAfter<T>(p: Promise<T>): Promise<T> {
+              p.then(() => {
+                sendProgress(++current, numPartitions);
+              });
+              return p;
+            }
+
             const partitionResults = await Promise.all(
               new Array(numPartitions)
                 .fill(0)
-                .map((v, i) => dispatchWork(partitionFunc(i))),
+                .map((v, i) => tickAfter(dispatchWork(partitionFunc(i)))),
             );
+
+            if (stream) {
+              await new Promise(resolve => stream!.end(resolve));
+            }
             return finalFunc(partitionResults);
-          },
+          }) as ExecTask,
           {
             numPartitions,
             partitionFunc,
             finalFunc,
+            showProgress,
+            v8: sf.requireModule('v8'),
           },
         ),
       ),

@@ -6,7 +6,11 @@
   "author": "dengyun <dengyun@meideng.net>",
   "license": "MIT",
   "dependencies": {
-    "tslib": "^1.9.3",
-    "@dcfjs/common": "1.0.0"
+    "@dcfjs/common": "1.0.0",
+    "@types/progress": "^2.0.3",
+    "@types/split": "^1.0.0",
+    "progress": "^2.0.3",
+    "split": "^1.0.1",
+    "tslib": "^1.9.3"
   }
 }
