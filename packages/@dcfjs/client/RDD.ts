@@ -11,8 +11,12 @@ export class RDD<T> {
   protected constructor(context: Context) {
     this._context = context;
   }
-  protected getFunc(): [number, PartitionFunc<T[]>] {
+  getFunc(): [number, PartitionFunc<T[]>] {
     throw new Error('Must be overrided.');
+  }
+
+  union(...others: RDD<T>[]): RDD<T> {
+    return this._context.union(this, ...others);
   }
 
   collect(): Promise<T[]> {
@@ -66,7 +70,7 @@ export class GeneratedRDD<T> extends RDD<T> {
     this._function = func;
   }
 
-  protected getFunc(): [number, PartitionFunc<T[]>] {
+  getFunc(): [number, PartitionFunc<T[]>] {
     return [this._partitionCount, this._function!];
   }
 }

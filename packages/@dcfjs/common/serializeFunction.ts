@@ -25,7 +25,10 @@ function serializeValue(v: any) {
         moduleName: v.moduleName,
       };
     }
-    if (v.constructor !== Object && !Array.isArray(v)) {
+    if (Array.isArray(v)) {
+      return v.map(serializeValue);
+    }
+    if (v.constructor !== Object) {
       throw new Error(`Cannot pass a ${v.constructor.name} object`);
     }
     if (v.__type) {
@@ -56,10 +59,10 @@ function deepFreeze(o: any) {
   return o;
 }
 
-function deserializeValue(v: any) {
+function deserializeValue(v: any): any {
   if (v && typeof v === 'object') {
     if (Array.isArray(v)) {
-      return deepFreeze(v);
+      return deepFreeze(v.map(deserializeValue));
     }
     if (v.__type) {
       switch (v.__type) {

@@ -59,6 +59,13 @@ export class Context {
     return new GeneratedRDD<never>(this, 0);
   }
 
+  range(to: number): RDD<number>;
+  range(
+    from: number,
+    to?: number,
+    step?: number,
+    numPartitions?: number,
+  ): RDD<number>;
   range(
     from: number,
     to?: number,
@@ -75,12 +82,7 @@ export class Context {
     const rest = finalCount % numPartitions;
     const eachCount = (finalCount - rest) / numPartitions;
 
-    interface Arg {
-      from: number;
-      count: number;
-    }
-
-    const args: Arg[] = [];
+    const args: Array<{ from: number; count: number }> = [];
     let index = 0;
     for (let i = 0; i < numPartitions; i++) {
       const subCount = i < rest ? eachCount + 1 : eachCount;
@@ -110,6 +112,65 @@ export class Context {
           );
         },
         { step, args, sf: sf.requireModule('@dcfjs/common/serializeFunction') },
+      ),
+    );
+  }
+
+  parallelize<T>(arr: T[], numPartitions?: number): RDD<T> {
+    numPartitions = numPartitions || this._option.defaultPartitions;
+    const args: T[][] = [];
+
+    const rest = arr.length % numPartitions;
+    const eachCount = (arr.length - rest) / numPartitions;
+
+    let index = 0;
+    for (let i = 0; i < numPartitions; i++) {
+      const subCount = i < rest ? eachCount + 1 : eachCount;
+      const end = index + subCount;
+      args.push(arr.slice(index, end));
+      index = end;
+    }
+
+    return new GeneratedRDD<T>(
+      this,
+      numPartitions,
+      sf.captureEnv(
+        partitionId => {
+          const data = args[partitionId];
+          return sf.captureEnv(() => data, {
+            data,
+          });
+        },
+        {
+          args,
+          sf: sf.requireModule('@dcfjs/common/serializeFunction'),
+        },
+      ),
+    );
+  }
+
+  union<T>(...rdds: RDD<T>[]): RDD<T> {
+    const rddFuncs = rdds.map(v => v.getFunc());
+    const totalPartition = rddFuncs.map(v => v[0]).reduce((a, b) => a + b, 0);
+
+    return new GeneratedRDD<T>(
+      this,
+      totalPartition,
+      sf.captureEnv(
+        partitionId => {
+          for (let i = 0; i < rddFuncs.length; i++) {
+            if (partitionId < rddFuncs[i][0]) {
+              return rddFuncs[i][1](partitionId);
+            }
+            partitionId -= rddFuncs[i][0];
+          }
+          // `partitionId` should be less than totalPartition.
+          // so it should not reach here.
+          throw new Error('Internal error.');
+        },
+        {
+          rddFuncs,
+        },
       ),
     );
   }

@@ -147,7 +147,6 @@ export async function createServer(
       let resp = await handler(body, stream.session);
       stream.end(serialize(resp));
     } catch (e) {
-      console.error(e.stack);
       if (e instanceof ServerError) {
         stream.respond({
           [http2.constants.HTTP2_HEADER_STATUS]: e.code,
