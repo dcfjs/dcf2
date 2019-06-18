@@ -7,7 +7,6 @@ import { createMasterServer } from '../../packages/@dcfjs/master';
 import { createLocalWorker } from '../../packages/@dcfjs/worker';
 import { serializeFunction } from '@dcfjs/common/serializeFunction';
 import { WorkDispatcher } from '../../packages/@dcfjs/master/workerManager';
-import { AssertionError } from 'assert';
 
 chai.use(chaiAsPromised);
 
@@ -42,8 +41,9 @@ describe('DCF With local worker', () => {
   });
 
   it('Prime test', async () => {
-    const primeCount = await client.post('/exec', {
-      func: serializeFunction(async (dispatchWork: WorkDispatcher) => {
+    const primeCount = await client.post(
+      '/exec',
+      serializeFunction(async (dispatchWork: WorkDispatcher) => {
         const counts = await Promise.all(
           new Array(100).fill(0).map((v, i) =>
             dispatchWork(() => {
@@ -63,7 +63,7 @@ describe('DCF With local worker', () => {
         );
         return counts.reduce((a, b) => a + b);
       }),
-    });
+    );
     console.log('Prime count in 0-999999 is(parallel): ', primeCount);
     let ret = 0;
     for (let i = 0; i < 999999; i++) {

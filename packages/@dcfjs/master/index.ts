@@ -14,7 +14,7 @@ import '@dcfjs/common/registerCaptureEnv';
 const ServerHandlers: ServerHandlerMap = {
   '/worker/register': handleRegisterWorker,
   '/worker/status': getWorkerStatus,
-  '/exec': ({ func }) => {
+  '/exec': func => {
     const f = deserializeFunction(func);
     return f(dispatchWork);
   },

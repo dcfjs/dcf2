@@ -49,7 +49,7 @@ export async function createWorkerServer(
         process.emit('SIGINT', 'SIGINT');
       });
     },
-    '/exec': ({ func }, sess) => {
+    '/exec': (func, sess) => {
       if (sess !== masterSession) {
         throw new ServerBadRequestError('Only master can execute scripts.');
       }

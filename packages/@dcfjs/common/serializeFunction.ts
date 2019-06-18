@@ -25,7 +25,7 @@ function serializeValue(v: any) {
         moduleName: v.moduleName,
       };
     }
-    if (v.constructor !== Object) {
+    if (v.constructor !== Object && !Array.isArray(v)) {
       throw new Error(`Cannot pass a ${v.constructor.name} object`);
     }
     if (v.__type) {
@@ -41,10 +41,9 @@ function serializeValue(v: any) {
 }
 
 function deepFreeze(o: any) {
-  var prop, propKey;
   Object.freeze(o);
-  for (propKey in o) {
-    prop = o[propKey];
+  for (const propKey in o) {
+    const prop = o[propKey];
     if (
       !o.hasOwnProperty(propKey) ||
       !(typeof prop === 'object') ||
@@ -54,10 +53,14 @@ function deepFreeze(o: any) {
     }
     deepFreeze(prop);
   }
+  return o;
 }
 
 function deserializeValue(v: any) {
   if (v && typeof v === 'object') {
+    if (Array.isArray(v)) {
+      return deepFreeze(v);
+    }
     if (v.__type) {
       switch (v.__type) {
         case 'object':
