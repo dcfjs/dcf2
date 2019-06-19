@@ -79,7 +79,7 @@ export class Context {
   execute<T, T1>(
     numPartitions: number,
     partitionFunc: PartitionFunc<T>,
-    finalFunc: (v: T[]) => T1,
+    finalFunc: (v: T[]) => T1 | Promise<T1>,
   ): Promise<T1> {
     const { showProgress } = this._option;
 

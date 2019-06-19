@@ -4,7 +4,7 @@ import concatArrays from '@dcfjs/common/concatArrays';
 import sf = require('@dcfjs/common/serializeFunction');
 
 export type ParallelTask = (dispachWorker: WorkDispatcher) => any;
-export type PartitionFunc<T> = (paritionId: number) => () => T;
+export type PartitionFunc<T> = (paritionId: number) => () => T | Promise<T>;
 
 export class RDD<T> {
   protected _context: Context;
@@ -41,10 +41,10 @@ export class RDD<T> {
           const f = partitionFunc(partitionId);
           return sf.captureEnv(
             () => {
-              return f().length;
+              return Promise.resolve(f()).then(v => v.length);
             },
             { f },
-          ) as () => number;
+          ) as () => Promise<number>;
         },
         {
           partitionFunc,
