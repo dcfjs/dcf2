@@ -162,7 +162,7 @@ export function releaseAllClient() {
 }
 
 export function dispatchWork<T = any>(
-  func: SerializedFunction<() => T> | (() => T),
+  func: SerializedFunction<() => T | Promise<T>> | (() => T | Promise<T>),
   env?: FunctionEnv,
 ): Promise<T> {
   if (typeof func === 'function') {
