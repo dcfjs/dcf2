@@ -77,8 +77,8 @@ export async function createLocalWorker(masterEndpoint: string) {
     env: {
       ...process.env,
       // Do not pass master port to worker.
-      PORT: undefined,
-      HOST: undefined,
+      PORT: '',
+      HOST: '',
       MASTER_ENDPOINT: masterEndpoint,
     },
     stdio: 'inherit',
