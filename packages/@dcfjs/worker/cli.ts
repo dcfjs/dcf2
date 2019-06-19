@@ -19,10 +19,6 @@ const HOST = process.env['HOST'] || 'localhost';
 async function main() {
   try {
     // Initial process:
-    if (process.env['NODE_ENV'] === 'development') {
-      // Wait master to be ready on development mode after each restart.
-      await new Promise(resolve => setTimeout(resolve, 500));
-    }
 
     // Create http2 server.
     const server = await createWorkerServer(MASTER_ENDPOINT, WORKER_SECRET, {
