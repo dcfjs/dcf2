@@ -71,4 +71,131 @@ describe('MapReduce With local worker', () => {
   it('Test a long task', async () => {
     await dcc.range(0, 100000000, 1, 200).count();
   }).timeout(60000);
+
+  it('Test take', async () => {
+    const source = dcc.range(100);
+    expect(await source.take(30)).deep.equals(await dcc.range(30).collect());
+
+    const source2 = dcc.range(10);
+    expect(await source2.take(30)).deep.equals([...Array(10).keys()]);
+
+    const source3 = dcc.emptyRDD();
+    expect(await source3.take(30)).deep.equals([]);
+  });
+
+  it('Test max', async () => {
+    const source = dcc.range(100000);
+    expect(await source.max()).deep.equals(99999);
+
+    const source2 = dcc.emptyRDD();
+    expect(await source2.max()).deep.equals(null);
+
+    const source3 = dcc.range(400).union(dcc.emptyRDD());
+    expect(await source3.max()).deep.equals(399);
+  });
+
+  it('Test min', async () => {
+    const source = dcc.range(120, 100000);
+    expect(await source.min()).deep.equals(120);
+
+    const source2 = dcc.emptyRDD();
+    expect(await source2.min()).deep.equals(null);
+
+    const source3 = dcc.range(120, 400).union(dcc.emptyRDD());
+    expect(await source3.min()).deep.equals(120);
+  });
+
+  it('Test map', async function() {
+    this.timeout(100000);
+
+    const source1 = dcc.range(1000000);
+    expect(await source1.map(v => 4).collect()).deep.equals(
+      new Array(1000000).fill(4),
+    );
+
+    const source2 = dcc.emptyRDD();
+    expect(await source2.map(v => 1).collect()).deep.equals([] as any);
+  });
+
+  it('Test flatMap', async function() {
+    this.timeout(100000);
+
+    const mapFunc = (v: any) => new Array(10).fill(1);
+
+    const source = dcc.range(100000);
+    expect(await source.flatMap(mapFunc).collect()).deep.equals(
+      new Array(1000000).fill(1),
+    );
+
+    const source2 = dcc.emptyRDD();
+    expect(await source2.flatMap(mapFunc).collect()).deep.equals([] as any);
+
+    const source3 = dcc.range(120).map(v => (v < 30 ? 1 : -1));
+    expect(
+      await source3
+        .flatMap(v => (v === 1 ? new Array(10).fill(-1) : []))
+        .collect(),
+    ).deep.equals(new Array(300).fill(-1));
+  });
+
+  it('Test filter', async function() {
+    this.timeout(100000);
+
+    const source1 = dcc.range(100000);
+    expect(await source1.filter(v => v < 100).collect()).deep.equals([
+      ...Array(100).keys(),
+    ]);
+
+    const source2 = dcc.range(100000);
+    expect(await source2.filter(v => false).collect()).deep.equals([] as any);
+
+    const source3 = dcc.emptyRDD();
+    expect(await source3.filter(v => true).collect()).deep.equals([] as any);
+  });
+
+  it('Test reduce', async function() {
+    this.timeout(100000);
+
+    const source1 = dcc.range(1000000).map(v => 1);
+    expect(await source1.reduce((a, b) => a + b)).deep.equals(1000000);
+
+    const source2 = dcc.range(1).map(v => 1);
+    expect(await source2.reduce((a, b) => a + b)).deep.equals(1);
+
+    const source3 = dcc.emptyRDD();
+    // @ts-ignore
+    expect(await source3.reduce((a, b) => a + b)).deep.equals(null);
+  });
+
+  it('Test mapPartition', async function() {
+    this.timeout(100000);
+
+    const source1 = dcc.range(1000000);
+    const res1 = await source1
+      .mapPartition(v => new Array(v.length).fill(-1))
+      .collect();
+    expect(res1).deep.equals(new Array(1000000).fill(-1));
+
+    const source2 = dcc.emptyRDD();
+    const res2 = await source2
+      .mapPartition(v => new Array(v.length).fill(-1))
+      .collect();
+    expect(res2).deep.equals([] as any);
+
+    const source3 = dcc.range(1);
+    const res3 = await source3
+      .mapPartition(v => new Array(v.length).fill(-1))
+      .collect();
+    expect(res3).deep.equals([-1]);
+  });
+
+  it('Test glom', async function() {
+    this.timeout(100000);
+
+    const source = dcc.range(1000000);
+    const res = await source.mapPartition(v => [v]).collect();
+    const tester = await source.glom().collect();
+
+    expect(res).deep.equals(tester);
+  });
 });
