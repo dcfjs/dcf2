@@ -39,7 +39,7 @@ export class Context {
 
           stream
             .pipe(split())
-            .on('data', function(line) {
+            .on('data', function(line: string) {
               if (!line) {
                 return;
               }

@@ -64,12 +64,12 @@ export class GeneratedRDD<T> extends RDD<T> {
   constructor(
     context: Context,
     partitionCount: number,
-    func: (paritionId: number) => () => T[],
+    func: (paritionId: number) => () => T[] | Promise<T[]>,
   );
   constructor(
     context: Context,
     partitionCount: number,
-    func?: (paritionId: number) => () => T[],
+    func?: (paritionId: number) => () => T[] | Promise<T[]>,
   ) {
     super(context);
     this._partitionCount = partitionCount;
