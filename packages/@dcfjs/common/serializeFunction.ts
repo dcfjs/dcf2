@@ -128,13 +128,14 @@ export function deserializeFunction<T extends (...args: any[]) => any>(
   noWrap?: boolean,
 ): T {
   let ret;
+  const valueMap = f.values.map(v => deserializeValue(v))
   if (noWrap) {
     ret = new Function(
       'require',
       '__args',
       `const [${f.args.join(',')}] = __args;
   return ${f.source}`,
-    )(require, f.values.map(v => deserializeValue(v)));
+    )(require, valueMap);
   } else {
     ret = new Function(
       'require',
@@ -142,11 +143,11 @@ export function deserializeFunction<T extends (...args: any[]) => any>(
       '__args',
       `const [${f.args.join(',')}] = __args;
 return __wrap(${f.source})`,
-    )(require, wrap, f.values.map(v => deserializeValue(v)));
+    )(require, wrap, valueMap);
   }
   const __env: FunctionEnv = {};
   for (let i = 0; i < f.args.length; i++) {
-    __env[f.args[i]] = f.values[i];
+    __env[f.args[i]] = valueMap[i];
   }
   captureEnv(ret, __env);
   return ret;
