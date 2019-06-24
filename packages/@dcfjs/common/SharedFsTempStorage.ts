@@ -40,6 +40,12 @@ export class SharedFsTempStorage implements TempStorage {
     return fs.readFileSync(this.resolve(key));
   }
 
+  getAndDeleteItem(key: string) {
+    const ret = this.getItem(key);
+    this.deleteItem(key);
+    return ret;
+  }
+
   deleteItem(key: string) {
     fs.unlinkSync(this.resolve(key));
   }
