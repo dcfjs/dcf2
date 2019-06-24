@@ -104,6 +104,9 @@ class ClientWorker {
   handleWork<T>(func: SerializedFunction<() => T>): Promise<T> {
     const ret = this.client.post<T>('/exec', func);
     ret.finally(() => this._becomeIdle());
+    ret.catch(e => {
+      console.warn(JSON.stringify(func, undefined, 2));
+    });
     return ret;
   }
 

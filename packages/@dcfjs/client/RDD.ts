@@ -1,6 +1,10 @@
+/**
+ * @noCaptureEnv
+ */
+import { FunctionEnv } from './../common/serializeFunction';
 import { WorkDispatcher } from '@dcfjs/master/workerManager';
 import { Context } from './Context';
-import { concatArrays, defaultComparator } from '@dcfjs/common/arrayHelpers';
+import ah = require('@dcfjs/common/arrayHelpers');
 import sf = require('@dcfjs/common/serializeFunction');
 
 export type ParallelTask = (dispachWorker: WorkDispatcher) => any;
@@ -8,10 +12,10 @@ export type PartitionFunc<T> = (paritionId: number) => () => T | Promise<T>;
 
 let DeprecationWarningPrinted = false;
 const envDeprecatedMsg =
-  'DeprecationWarning: manual env passing is deprecated and will be removed in a future version';
+  'DeprecationWarning: manual env passing is deprecated and will be removed in future. use `captureEnv` or `registerCaptureEnv` instead.\nSee also: https://dcf.gitbook.io/dcf/guide/serialized-function-since-2.0';
 
-function envDeprecated(env: any) {
-  if (!!env && !DeprecationWarningPrinted) {
+function envDeprecated() {
+  if (!DeprecationWarningPrinted) {
     console.warn(envDeprecatedMsg);
     DeprecationWarningPrinted = true;
   }
@@ -38,7 +42,7 @@ export class RDD<T> {
     const numPartitions = this.getNumPartitions();
     const partitionFunc = this.getFunc();
 
-    return this._context.execute(numPartitions, partitionFunc, concatArrays);
+    return this._context.execute(numPartitions, partitionFunc, ah.concatArrays);
   }
 
   count(): Promise<number> {
@@ -77,7 +81,7 @@ export class RDD<T> {
           const f = partitionFunc(partitionId);
           return sf.captureEnv(
             () => {
-              return Promise.resolve(f()).then((v: T[]) => v.slice(0, count));
+              return Promise.resolve(f()).then(v => v.slice(0, count));
             },
             { f },
           );
@@ -88,14 +92,21 @@ export class RDD<T> {
           sf: sf.requireModule('@dcfjs/common/serializeFunction'),
         },
       ),
-      v => concatArrays(v).slice(0, count),
+      sf.captureEnv(v => ah.concatArrays(v).slice(0, count), {
+        ah: sf.requireModule('@dcfjs/common/arrayHelpers'),
+      }),
     );
   }
 
-  max(comparator = defaultComparator): Promise<T | null> {
+  max(
+    this: RDD<number>,
+    comparator?: (a: number, b: number) => number,
+  ): Promise<T | undefined>;
+  max(comparator: (a: T, b: T) => number): Promise<T | undefined>;
+  max(comparator: any = ah.defaultComparator): Promise<T | undefined> {
     return this.reduce(
       sf.captureEnv(
-        (a: any, b: any) => {
+        (a, b) => {
           return comparator(a, b) > 0 ? a : b;
         },
         {
@@ -105,10 +116,15 @@ export class RDD<T> {
     );
   }
 
-  min(comparator = defaultComparator): Promise<T | null> {
+  min(
+    this: RDD<number>,
+    comparator?: (a: number, b: number) => number,
+  ): Promise<T | undefined>;
+  min(comparator: (a: T, b: T) => number): Promise<T | undefined>;
+  min(comparator: any = ah.defaultComparator): Promise<T | undefined> {
     return this.reduce(
       sf.captureEnv(
-        (a: any, b: any) => {
+        (a, b) => {
           return comparator(a, b) < 0 ? a : b;
         },
         {
@@ -118,11 +134,17 @@ export class RDD<T> {
     );
   }
 
-  mapPartitions<T1>(transformer: (input: T[]) => T1[], env?: any): RDD<T1> {
+  mapPartitions<T1>(
+    transformer: (input: T[]) => T1[],
+    env?: FunctionEnv,
+  ): RDD<T1> {
     const numPartitions = this.getNumPartitions();
     const partitionFunc = this.getFunc();
 
-    envDeprecated(env);
+    if (env) {
+      sf.captureEnv(transformer, env);
+      envDeprecated();
+    }
 
     return new GeneratedRDD<T1>(
       this._context,
@@ -149,117 +171,47 @@ export class RDD<T> {
     return this.mapPartitions(v => [v]);
   }
 
-  map<T1>(transformer: (input: T) => T1, env?: any): RDD<T1> {
-    const numPartitions = this.getNumPartitions();
-    const partitionFunc = this.getFunc();
-
-    envDeprecated(env);
-
-    return new GeneratedRDD<T1>(
-      this._context,
-      numPartitions,
-      sf.captureEnv(
-        partitionId => {
-          const f = partitionFunc(partitionId);
-          return sf.captureEnv(
-            () => {
-              return Promise.resolve(f()).then(arr => {
-                const resArr = new Array(arr.length);
-                for (let i = 0; i < arr.length; i++) {
-                  resArr[i] = transformer(arr[i]);
-                }
-                return resArr;
-              });
-            },
-            { f, transformer },
-          );
-        },
-        {
-          transformer,
-          sf: sf.requireModule('@dcfjs/common/serializeFunction'),
-        },
-      ),
+  map<T1>(transformer: (input: T) => T1, env?: FunctionEnv): RDD<T1> {
+    if (env) {
+      sf.captureEnv(transformer, env);
+      envDeprecated();
+    }
+    return this.mapPartitions(
+      sf.captureEnv(v => v.map(v => transformer(v)), { transformer }),
     );
   }
 
-  flatMap<T1>(transformer: (input: T) => T1[], env?: any): RDD<T1> {
-    const numPartitions = this.getNumPartitions();
-    const partitionFunc = this.getFunc();
-
-    envDeprecated(env);
-
-    return new GeneratedRDD<T1>(
-      this._context,
-      numPartitions,
-      sf.captureEnv(
-        partitionId => {
-          const f = partitionFunc(partitionId);
-          return sf.captureEnv(
-            () => {
-              return Promise.resolve(f()).then(arr => {
-                const newArr = [];
-                for (let i = 0; i < arr.length; i++) {
-                  const tmpRes = transformer(arr[i]);
-                  if (!tmpRes) {
-                    continue;
-                  }
-                  for (const item of tmpRes) {
-                    newArr.push(item);
-                  }
-                }
-
-                return newArr;
-              });
-            },
-            { f, transformer },
-          );
-        },
-        {
-          transformer,
-          sf: sf.requireModule('@dcfjs/common/serializeFunction'),
-        },
-      ),
+  flatMap<T1>(transformer: (input: T) => T1[], env?: FunctionEnv): RDD<T1> {
+    if (env) {
+      sf.captureEnv(transformer, env);
+      envDeprecated();
+    }
+    return this.mapPartitions(
+      sf.captureEnv(v => ah.concatArrays(v.map(v => transformer(v))), {
+        transformer,
+        ah: sf.requireModule('@dcfjs/common/arrayHelpers'),
+      }),
     );
   }
 
-  filter(filterFunc: (input: any) => boolean, env?: any): RDD<T> {
-    const numPartitions = this.getNumPartitions();
-    const partitionFunc = this.getFunc();
-
-    envDeprecated(env);
-
-    return new GeneratedRDD<T>(
-      this._context,
-      numPartitions,
-      sf.captureEnv(
-        partitionId => {
-          const f = partitionFunc(partitionId);
-          return sf.captureEnv(
-            () => {
-              return Promise.resolve(f()).then(arr => {
-                const newArr = [];
-                for (let i = 0; i < arr.length; i++) {
-                  if (filterFunc(arr[i])) {
-                    newArr.push(arr[i]);
-                  }
-                }
-
-                return newArr;
-              });
-            },
-            { f, filterFunc },
-          );
-        },
-        { filterFunc, sf: sf.requireModule('@dcfjs/common/serializeFunction') },
-      ),
+  filter(filterFunc: (input: T) => boolean, env?: FunctionEnv): RDD<T> {
+    if (env) {
+      sf.captureEnv(filterFunc, env);
+      envDeprecated();
+    }
+    return this.mapPartitions(
+      sf.captureEnv(v => v.filter(v => filterFunc(v)), { filterFunc }),
     );
   }
 
-  reduce(reduceFunc: (a: T, b: T) => T, env?: any): Promise<T | null> {
+  reduce(reduceFunc: (a: T, b: T) => T, env?: any): Promise<T | undefined> {
     const numPartitions = this.getNumPartitions();
     const partitionFunc = this.getFunc();
 
-    envDeprecated(env);
+    if (env) {
+      sf.captureEnv(reduceFunc, env);
+      envDeprecated();
+    }
 
     return this._context.execute(
       numPartitions,
@@ -269,16 +221,13 @@ export class RDD<T> {
           return sf.captureEnv(
             () => {
               return Promise.resolve(f()).then(arr => {
-                if (arr.length < 2) {
-                  return arr[0];
-                }
+                let lastRes: T | undefined = arr[0];
 
-                let lastRes = reduceFunc(arr[0], arr[1]);
-                for (let i = 2; i < arr.length; i++) {
+                for (let i = 1; i < arr.length; i++) {
                   lastRes = reduceFunc(lastRes, arr[i]);
                 }
 
-                return lastRes;
+                return lastRes as T | undefined;
               });
             },
             { f, reduceFunc },
@@ -290,18 +239,11 @@ export class RDD<T> {
           sf: sf.requireModule('@dcfjs/common/serializeFunction'),
         },
       ),
-      v => {
-        v = v.filter(v => typeof v !== 'undefined');
-
-        if (v.length === 1) {
-          return v[0];
-        } else if (v.length === 0) {
-          return null;
-        }
-
-        let lastRes = reduceFunc(v[0], v[1]);
-        for (let i = 2; i < v.length; i++) {
-          lastRes = reduceFunc(lastRes, v[i]);
+      arr => {
+        arr = arr.filter(v => v !== undefined) as T[];
+        let lastRes: T | undefined = arr[0];
+        for (let i = 1; i < arr.length; i++) {
+          lastRes = reduceFunc(lastRes!, arr[i]!);
         }
 
         return lastRes;

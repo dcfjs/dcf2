@@ -89,13 +89,16 @@ export function requireModule(v: string) {
 export function serializeFunction<T extends (...args: any[]) => any>(
   f: T & {
     __env?: FunctionEnv;
+    __serialized?: SerializedFunction<T>;
   },
   env?: FunctionEnv,
 ): SerializedFunction<T> {
+  if (f.__serialized) {
+    return f.__serialized;
+  }
   env = env || f.__env;
   const args: string[] = [];
   const values: any[] = [];
-  const functions: any[] = [];
 
   if (env) {
     for (const key of Object.keys(env)) {
@@ -109,7 +112,6 @@ export function serializeFunction<T extends (...args: any[]) => any>(
     source: f.toString(),
     args,
     values,
-    functions,
   } as SerializedFunction<T>;
 }
 
@@ -128,7 +130,7 @@ export function deserializeFunction<T extends (...args: any[]) => any>(
   noWrap?: boolean,
 ): T {
   let ret;
-  const valueMap = f.values.map(v => deserializeValue(v))
+  const valueMap = f.values.map(v => deserializeValue(v));
   if (noWrap) {
     ret = new Function(
       'require',
@@ -145,11 +147,11 @@ export function deserializeFunction<T extends (...args: any[]) => any>(
 return __wrap(${f.source})`,
     )(require, wrap, valueMap);
   }
-  const __env: FunctionEnv = {};
-  for (let i = 0; i < f.args.length; i++) {
-    __env[f.args[i]] = valueMap[i];
-  }
-  captureEnv(ret, __env);
+  Object.defineProperty(ret, '__serialized', {
+    value: f,
+    enumerable: false,
+    configurable: false,
+  });
   return ret;
 }
 

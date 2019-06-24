@@ -8,6 +8,6 @@ export function concatArrays<T>(arr: T[][]): T[] {
   return ret;
 }
 
-export function defaultComparator(a: any, b: any): any {
+export function defaultComparator(a: number, b: number): number {
   return a - b;
 }

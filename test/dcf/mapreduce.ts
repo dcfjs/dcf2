@@ -5,6 +5,7 @@ import { createMasterServer } from '@dcfjs/master';
 import { createLocalWorker } from '@dcfjs/worker';
 import { Context, createContext } from '@dcfjs/client/Context';
 import { expect } from 'chai';
+import { RDD } from '@dcfjs/client';
 
 chai.use(chaiAsPromised);
 
@@ -68,10 +69,6 @@ describe('MapReduce With local worker', () => {
     ).deep.equals(await dcc.range(30).collect());
   });
 
-  it('Test a long task', async () => {
-    await dcc.range(0, 100000000, 1, 200).count();
-  }).timeout(60000);
-
   it('Test take', async () => {
     const source = dcc.range(100);
     expect(await source.take(30)).deep.equals(await dcc.range(30).collect());
@@ -84,34 +81,32 @@ describe('MapReduce With local worker', () => {
   });
 
   it('Test max', async () => {
-    const source = dcc.range(100000);
-    expect(await source.max()).deep.equals(99999);
+    const source = dcc.range(1000);
+    expect(await source.max()).deep.equals(999);
 
     const source2 = dcc.emptyRDD();
-    expect(await source2.max()).deep.equals(null);
+    expect(await source2.max()).deep.equals(undefined);
 
     const source3 = dcc.range(400).union(dcc.emptyRDD());
     expect(await source3.max()).deep.equals(399);
   });
 
   it('Test min', async () => {
-    const source = dcc.range(120, 100000);
+    const source = dcc.range(120, 1000);
     expect(await source.min()).deep.equals(120);
 
     const source2 = dcc.emptyRDD();
-    expect(await source2.min()).deep.equals(null);
+    expect(await source2.min()).deep.equals(undefined);
 
     const source3 = dcc.range(120, 400).union(dcc.emptyRDD());
     expect(await source3.min()).deep.equals(120);
   });
 
   it('Test map', async function() {
-    this.timeout(100000);
-
     let target = 4;
-    const source1 = dcc.range(1000000);
-    expect(await source1.map(v => target, { target }).collect()).deep.equals(
-      new Array(1000000).fill(4),
+    const source1 = dcc.range(10000);
+    expect(await source1.map(v => target).collect()).deep.equals(
+      new Array(10000).fill(4),
     );
 
     const source2 = dcc.emptyRDD();
@@ -119,13 +114,11 @@ describe('MapReduce With local worker', () => {
   });
 
   it('Test flatMap', async function() {
-    this.timeout(100000);
+    const mapFunc = (): number[] => new Array(10).fill(1);
 
-    const mapFunc = (v: any) => new Array(10).fill(1);
-
-    const source = dcc.range(100000);
+    const source = dcc.range(100);
     expect(await source.flatMap(mapFunc).collect()).deep.equals(
-      new Array(1000000).fill(1),
+      new Array(1000).fill(1),
     );
 
     const source2 = dcc.emptyRDD();
@@ -140,14 +133,14 @@ describe('MapReduce With local worker', () => {
   });
 
   it('Test filter', async function() {
-    this.timeout(100000);
+    this.timeout(1000);
 
-    const source1 = dcc.range(100000);
+    const source1 = dcc.range(1000);
     expect(await source1.filter(v => v < 100).collect()).deep.equals([
       ...Array(100).keys(),
     ]);
 
-    const source2 = dcc.range(100000);
+    const source2 = dcc.range(1000);
     expect(await source2.filter(v => false).collect()).deep.equals([] as any);
 
     const source3 = dcc.emptyRDD();
@@ -155,27 +148,23 @@ describe('MapReduce With local worker', () => {
   });
 
   it('Test reduce', async function() {
-    this.timeout(100000);
-
-    const source1 = dcc.range(1000000).map(v => 1);
-    expect(await source1.reduce((a, b) => a + b)).deep.equals(1000000);
+    const source1 = dcc.range(10000).map(v => 1);
+    expect(await source1.reduce((a, b) => a + b)).deep.equals(10000);
 
     const source2 = dcc.range(1).map(v => 1);
     expect(await source2.reduce((a, b) => a + b)).deep.equals(1);
 
-    const source3 = dcc.emptyRDD();
-    // @ts-ignore
-    expect(await source3.reduce((a, b) => a + b)).deep.equals(null);
+    const source3 = dcc.emptyRDD() as RDD<number>;
+
+    expect(await source3.reduce((a, b) => a + b)).deep.equals(undefined);
   });
 
   it('Test mapPartition', async function() {
-    this.timeout(100000);
-
-    const source1 = dcc.range(1000000);
+    const source1 = dcc.range(10000);
     const res1 = await source1
       .mapPartitions(v => new Array(v.length).fill(-1))
       .collect();
-    expect(res1).deep.equals(new Array(1000000).fill(-1));
+    expect(res1).deep.equals(new Array(10000).fill(-1));
 
     const source2 = dcc.emptyRDD();
     const res2 = await source2
@@ -191,9 +180,7 @@ describe('MapReduce With local worker', () => {
   });
 
   it('Test glom', async function() {
-    this.timeout(100000);
-
-    const source = dcc.range(1000000);
+    const source = dcc.range(10000);
     const res = await source.mapPartitions(v => [v]).collect();
     const tester = await source.glom().collect();
 
