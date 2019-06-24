@@ -13,6 +13,8 @@ import {
 import { deserializeFunction } from '@dcfjs/common/serializeFunction';
 import '@dcfjs/common/registerCaptureEnv';
 import { ServerHttp2Stream } from 'http2';
+import { TempStorage } from '@dcfjs/common/tempStorage';
+import { registerTempStorage } from '@dcfjs/common/storageRegistry';
 
 export type ExecTask = (
   dispatchWork: WorkDispatcher,
@@ -29,6 +31,23 @@ const ServerHandlers: ServerHandlerMap = {
   },
 };
 
-export function createMasterServer(config?: ServerConfig) {
+export async function createMasterServer(config?: ServerConfig) {
+  // Init temp storages.
+
+  if (config && config.storages) {
+    // Init temp storages.
+    for (const storageConfig of config.storages) {
+      let factory = require(storageConfig.module);
+      if (factory && factory.default) {
+        factory = factory.default;
+      }
+      const storage: TempStorage = factory(storageConfig.options);
+      if (storage.cleanUp) {
+        await storage.cleanUp();
+      }
+      registerTempStorage(storageConfig.name, storage);
+    }
+  }
+
   return createServer(ServerHandlers, config);
 }

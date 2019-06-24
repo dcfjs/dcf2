@@ -10,10 +10,17 @@ export type ServerHandler = (
 ) => any | Promise<any>;
 export type ServerHandlerMap = { [url: string]: ServerHandler };
 
+type ServerStorageConfig = {
+  name: string; // name of registered storage.
+  module: string; // name of a module provides a factory.
+  options?: any;
+};
+
 export interface ServerConfig {
   port?: number;
   host?: string;
   backlog?: number;
+  storages?: ServerStorageConfig[];
 }
 
 export interface CustomSession extends http2.ServerHttp2Session {

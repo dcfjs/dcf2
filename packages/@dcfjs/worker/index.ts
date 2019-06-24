@@ -12,6 +12,7 @@ import '@dcfjs/common/registerCaptureEnv';
 import { fork } from 'child_process';
 
 import debugFactory from 'debug';
+import { registerTempStorage } from '@dcfjs/common/storageRegistry';
 
 const debug = debugFactory('worker:cli');
 
@@ -38,6 +39,7 @@ export async function createWorkerServer(
 ) {
   let workerId: string | null = null;
   let masterSession: Http2Session | null = null;
+  let endpoint: string | null = null;
 
   const ServerHandlers: ServerHandlerMap = {
     '/init': ({ secret, id }, sess) => {
@@ -53,6 +55,14 @@ export async function createWorkerServer(
         process.emit('SIGINT', 'SIGINT');
       });
     },
+    '/init-storage': ({ name, factory }) => {
+      factory = deserializeFunction(factory);
+      const storage = factory({
+        workerId,
+        endpoint,
+      });
+      registerTempStorage(name, storage);
+    },
     '/exec': (func, sess) => {
       if (sess !== masterSession) {
         throw new ServerBadRequestError('Only master can execute scripts.');
@@ -63,6 +73,7 @@ export async function createWorkerServer(
   };
 
   const server = await createServer(ServerHandlers, option);
+  endpoint = server.endpoint;
 
   // Register worker.
   await registerWorker(masterEndpoint, server.endpoint, workerSecret);

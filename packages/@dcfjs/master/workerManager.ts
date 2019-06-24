@@ -1,3 +1,4 @@
+import { MasterTempStorage } from './../common/tempStorage';
 import { ServerBadRequestError } from '@dcfjs/common/server';
 import { Client, createClient } from '@dcfjs/common/client';
 import { iterator } from '@dcfjs/common/shortId';
@@ -8,6 +9,7 @@ import {
 } from '@dcfjs/common/serializeFunction';
 
 import debugFactory from 'debug';
+import { getStorageEntries } from '@dcfjs/common/storageRegistry';
 
 const debug = debugFactory('master:worker');
 
@@ -144,10 +146,25 @@ export const handleRegisterWorker = async ({
   try {
     const client = await createClient(endpoint);
     const id = idGen();
-    await client.post('/init', { secret: SECRET, id });
-    new ClientWorker(id, client);
-    debug(`Worker ${id} connected from ${endpoint}.`);
+    try {
+      await client.post('/init', { secret: SECRET, id });
+      for (const [name, storage] of getStorageEntries()) {
+        await client.post('/init-storage', {
+          name,
+          factory: serializeFunction(
+            (storage as MasterTempStorage).getFactory(),
+          ),
+        });
+      }
+
+      new ClientWorker(id, client);
+      debug(`Worker ${id} connected from ${endpoint}.`);
+    } catch (e) {
+      client.close();
+      throw e;
+    }
   } catch (e) {
+    debug(`Worker initial failed: ` + e.stack);
     throw new Error('Failed to contact with worker:\n\t' + e.message);
   }
 };
