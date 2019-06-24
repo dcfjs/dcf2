@@ -6,14 +6,10 @@ export interface TempStorage {
   deleteItem(key: string): void | Promise<void>;
   generateKey(): string | Promise<void>;
 
-  // Clean up storage at worker side.
   cleanUp?(): void | Promise<void>;
 }
 
 export interface MasterTempStorage extends TempStorage {
-  // Clean up storage at master side.
-  cleanUp?(): void | Promise<void>;
-
   // Generate storage at worker
   getFactory(): (options: {
     workerId: string;

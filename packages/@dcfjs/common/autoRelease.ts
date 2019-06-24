@@ -1,7 +1,7 @@
-export type CleaupFunction = () => any | Promise<any>;
-const release: CleaupFunction[] = [];
+export type CleanupFunction = () => any | Promise<any>;
+const release: CleanupFunction[] = [];
 
-export function autoRelease(func: CleaupFunction) {
+export function autoRelease(func: CleanupFunction) {
   release.push(func);
 }
 

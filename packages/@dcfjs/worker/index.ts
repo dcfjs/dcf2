@@ -1,3 +1,4 @@
+import { TempStorage } from './../common/tempStorage';
 import { ServerConfig } from './../common/server';
 
 import {
@@ -55,12 +56,15 @@ export async function createWorkerServer(
         process.emit('SIGINT', 'SIGINT');
       });
     },
-    '/init-storage': ({ name, factory }) => {
+    '/init-storage': async ({ name, factory }) => {
       factory = deserializeFunction(factory);
-      const storage = factory({
+      const storage: TempStorage = factory({
         workerId,
         endpoint,
       });
+      if (storage.cleanUp) {
+        await storage.cleanUp();
+      }
       registerTempStorage(name, storage);
     },
     '/exec': (func, sess) => {

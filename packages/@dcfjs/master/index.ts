@@ -1,3 +1,4 @@
+import { CleanupFunction } from './../common/autoRelease';
 import {
   createServer,
   ServerHandlerMap,
@@ -12,22 +13,41 @@ import {
 } from './workerManager';
 import { deserializeFunction } from '@dcfjs/common/serializeFunction';
 import '@dcfjs/common/registerCaptureEnv';
-import { ServerHttp2Stream } from 'http2';
+import { ServerHttp2Stream, ServerHttp2Session } from 'http2';
 import { TempStorage } from '@dcfjs/common/tempStorage';
 import { registerTempStorage } from '@dcfjs/common/storageRegistry';
 
 export type ExecTask = (
   dispatchWork: WorkDispatcher,
   createPushStream: (path: string) => Promise<ServerHttp2Stream>,
+  autoRelease: (func: CleanupFunction) => void,
 ) => any | Promise<any>;
+
+type Http2SessionWithAutoRelease = ServerHttp2Session & {
+  autoRelease?: (func: CleanupFunction) => void;
+};
 
 const ServerHandlers: ServerHandlerMap = {
   '/worker/register': handleRegisterWorker,
   '/worker/status': getWorkerStatus,
-  '/exec': async (func, sess, stream) => {
+  '/exec': async (func, _sess, stream) => {
+    const sess = _sess as Http2SessionWithAutoRelease;
+    let autoRelease = sess.autoRelease;
+    if (!autoRelease) {
+      const release: CleanupFunction[] = [];
+      autoRelease = sess.autoRelease = func => {
+        release.push(func);
+      };
+      sess.on('close', async () => {
+        while (release.length > 0) {
+          await release.pop()!();
+        }
+      });
+    }
+
     const f = deserializeFunction(func);
     const createPushStream = (path: string) => pushStream(stream, path);
-    return await f(dispatchWork, createPushStream);
+    return await f(dispatchWork, createPushStream, autoRelease);
   },
 };
 

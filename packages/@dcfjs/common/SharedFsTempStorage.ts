@@ -61,6 +61,7 @@ export class SharedFsTempMasterStorage extends SharedFsTempStorage
     super(basePath);
   }
 
+  // only cleanup at worker side.
   cleanUp() {
     if (!fs.existsSync(this._basePath)) {
       fs.mkdirSync(this._basePath);
