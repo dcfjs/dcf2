@@ -108,8 +108,9 @@ describe('MapReduce With local worker', () => {
   it('Test map', async function() {
     this.timeout(100000);
 
+    let target = 4;
     const source1 = dcc.range(1000000);
-    expect(await source1.map(v => 4).collect()).deep.equals(
+    expect(await source1.map(v => target, { target }).collect()).deep.equals(
       new Array(1000000).fill(4),
     );
 
@@ -172,19 +173,19 @@ describe('MapReduce With local worker', () => {
 
     const source1 = dcc.range(1000000);
     const res1 = await source1
-      .mapPartition(v => new Array(v.length).fill(-1))
+      .mapPartitions(v => new Array(v.length).fill(-1))
       .collect();
     expect(res1).deep.equals(new Array(1000000).fill(-1));
 
     const source2 = dcc.emptyRDD();
     const res2 = await source2
-      .mapPartition(v => new Array(v.length).fill(-1))
+      .mapPartitions(v => new Array(v.length).fill(-1))
       .collect();
     expect(res2).deep.equals([] as any);
 
     const source3 = dcc.range(1);
     const res3 = await source3
-      .mapPartition(v => new Array(v.length).fill(-1))
+      .mapPartitions(v => new Array(v.length).fill(-1))
       .collect();
     expect(res3).deep.equals([-1]);
   });
@@ -193,7 +194,7 @@ describe('MapReduce With local worker', () => {
     this.timeout(100000);
 
     const source = dcc.range(1000000);
-    const res = await source.mapPartition(v => [v]).collect();
+    const res = await source.mapPartitions(v => [v]).collect();
     const tester = await source.glom().collect();
 
     expect(res).deep.equals(tester);

@@ -6,6 +6,17 @@ import sf = require('@dcfjs/common/serializeFunction');
 export type ParallelTask = (dispachWorker: WorkDispatcher) => any;
 export type PartitionFunc<T> = (paritionId: number) => () => T | Promise<T>;
 
+let DeprecationWarningPrinted = false;
+const envDeprecatedMsg =
+  'DeprecationWarning: manual env passing is deprecated and will be removed in a future version';
+
+function envDeprecated(env: any) {
+  if (!!env && !DeprecationWarningPrinted) {
+    console.warn(envDeprecatedMsg);
+    DeprecationWarningPrinted = true;
+  }
+}
+
 export class RDD<T> {
   protected _context: Context;
   protected constructor(context: Context) {
@@ -107,9 +118,11 @@ export class RDD<T> {
     );
   }
 
-  mapPartition<T1>(transformer: (input: T[]) => T1[]): RDD<T1> {
+  mapPartitions<T1>(transformer: (input: T[]) => T1[], env?: any): RDD<T1> {
     const numPartitions = this.getNumPartitions();
     const partitionFunc = this.getFunc();
+
+    envDeprecated(env);
 
     return new GeneratedRDD<T1>(
       this._context,
@@ -133,12 +146,14 @@ export class RDD<T> {
   }
 
   glom(): RDD<T[]> {
-    return this.mapPartition(v => [v]);
+    return this.mapPartitions(v => [v]);
   }
 
-  map<T1>(transformer: (input: T) => T1): RDD<T1> {
+  map<T1>(transformer: (input: T) => T1, env?: any): RDD<T1> {
     const numPartitions = this.getNumPartitions();
     const partitionFunc = this.getFunc();
+
+    envDeprecated(env);
 
     return new GeneratedRDD<T1>(
       this._context,
@@ -167,9 +182,11 @@ export class RDD<T> {
     );
   }
 
-  flatMap<T1>(transformer: (input: T) => T1[]): RDD<T1> {
+  flatMap<T1>(transformer: (input: T) => T1[], env?: any): RDD<T1> {
     const numPartitions = this.getNumPartitions();
     const partitionFunc = this.getFunc();
+
+    envDeprecated(env);
 
     return new GeneratedRDD<T1>(
       this._context,
@@ -205,9 +222,11 @@ export class RDD<T> {
     );
   }
 
-  filter(filterFunc: (input: any) => boolean): RDD<T> {
+  filter(filterFunc: (input: any) => boolean, env?: any): RDD<T> {
     const numPartitions = this.getNumPartitions();
     const partitionFunc = this.getFunc();
+
+    envDeprecated(env);
 
     return new GeneratedRDD<T>(
       this._context,
@@ -236,9 +255,11 @@ export class RDD<T> {
     );
   }
 
-  reduce(reduceFunc: (a: T, b: T) => T): Promise<T | null> {
+  reduce(reduceFunc: (a: T, b: T) => T, env?: any): Promise<T | null> {
     const numPartitions = this.getNumPartitions();
     const partitionFunc = this.getFunc();
+
+    envDeprecated(env);
 
     return this._context.execute(
       numPartitions,
