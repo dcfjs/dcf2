@@ -1,9 +1,7 @@
+import '@dcfjs/common/noCaptureEnv';
 import { TempStorageSession } from './../common/storageRegistry';
 import { CleanupFunction } from './../common/autoRelease';
 import { UnionRDD } from './RDD';
-/**
- * @noCaptureEnv
- */
 import { createClient, Client } from '@dcfjs/common/client';
 import { RDD, GeneratedRDD, PartitionFunc } from './RDD';
 import * as http2 from 'http2';
@@ -95,8 +93,8 @@ export class Context {
       paritionId: number,
       tempStorageSession: TempStorageSession,
     ) =>
-      | (() => T | Promise<T>) // single function runs on worker.
-      | ([() => T2 | Promise<T2>, (arg: T2) => T | Promise<T>]), // first function run on worker, second function run on master
+      | ((workerId: string) => T | Promise<T>) // single function runs on worker.
+      | ([(workerId: string) => T2 | Promise<T2>, (arg: T2) => T | Promise<T>]), // first function run on worker, second function run on master
     finalFunc: (v: T[]) => T1 | Promise<T1>,
   ): Promise<T1> {
     const { showProgress } = this._option;

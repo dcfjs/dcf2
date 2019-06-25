@@ -275,7 +275,7 @@ function hookCode(ast: any) {
 }
 
 export function transformCode(code: string, filename: string) {
-  if (/@noCaptureEnv/.test(code)) {
+  if (/@dcfjs\/common\/noCaptureEnv/.test(code)) {
     return code;
   }
 

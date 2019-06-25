@@ -1,6 +1,4 @@
-/**
- * @noCaptureEnv
- */
+import '@dcfjs/common/noCaptureEnv';
 import * as path from 'path';
 import * as fs from 'fs';
 import { MasterTempStorage, TempStorage } from './tempStorage';
@@ -59,7 +57,10 @@ export class SharedFsTempStorage implements TempStorage {
 
   refreshExpired(key: string) {
     const now = new Date();
-    fs.utimesSync(this.resolve(key), now, now);
+    const path = this.resolve(key);
+    if (fs.existsSync(path)) {
+      fs.utimesSync(path, now, now);
+    }
   }
 }
 

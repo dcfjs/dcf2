@@ -9,7 +9,8 @@
     "strict": true,
     "noImplicitAny": true,
     "importHelpers": true,
-    "allowJs": false
+    "allowJs": false,
+    "removeComments": false
   },
   "include": ["./packages/**/*", "./samples/**/*", "./test/**/*"]
 }

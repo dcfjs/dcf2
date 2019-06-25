@@ -103,7 +103,7 @@ class ClientWorker {
     this._removeFromIdleList();
   }
 
-  handleWork<T>(func: SerializedFunction<() => T>): Promise<T> {
+  handleWork<T>(func: SerializedFunction<(workerId: string) => T>): Promise<T> {
     const ret = this.client.post<T>('/exec', func);
     ret.finally(() => this._becomeIdle());
     ret.catch(e => {
@@ -113,7 +113,7 @@ class ClientWorker {
   }
 
   static dispatchWork<T>(
-    func: SerializedFunction<() => T>,
+    func: SerializedFunction<(workerId: string) => T>,
     resolve: (result: T) => void,
     reject: (reason: any) => void,
   ) {
@@ -182,7 +182,9 @@ export function releaseAllClient() {
 }
 
 export function dispatchWork<T = any>(
-  func: SerializedFunction<() => T | Promise<T>> | (() => T | Promise<T>),
+  func:
+    | SerializedFunction<(workerId: string) => T | Promise<T>>
+    | ((workerId: string) => T | Promise<T>),
   env?: FunctionEnv,
 ): Promise<T> {
   if (typeof func === 'function') {
@@ -190,7 +192,7 @@ export function dispatchWork<T = any>(
   }
   return new Promise<T>((resolve, reject) => {
     ClientWorker.dispatchWork(
-      func as SerializedFunction<() => T>,
+      func as SerializedFunction<(workerId: string) => T>,
       resolve,
       reject,
     );

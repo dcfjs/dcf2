@@ -4,6 +4,8 @@ export interface TempStorage {
   getItem(key: string): Buffer | Promise<Buffer>;
   getAndDeleteItem(key: string): Buffer | Promise<Buffer>;
   deleteItem(key: string): void | Promise<void>;
+
+  // Generate a unique key for this storage. It's safe to use it with a suffix starts with `-`.
   generateKey(): string | Promise<string>;
 
   // Remove outdated data(periodly)
@@ -12,7 +14,7 @@ export interface TempStorage {
   // Remove all data(after master/worker restarted.)
   cleanAll?(): void | Promise<void>;
 
-  // mark a file that should not be auto cleaned in a period.
+  // mark a file that should not be auto cleaned in a period. if the file doesn't exists, it should ignore and continue.
   refreshExpired(key: string): void | Promise<void>;
 }
 

@@ -1,8 +1,5 @@
+import '@dcfjs/common/noCaptureEnv';
 import { ExecTask } from './../master/index';
-import { CleanupFunction } from './../common/autoRelease';
-/**
- * @noCaptureEnv
- */
 import { FunctionEnv } from './../common/serializeFunction';
 import { WorkDispatcher } from '@dcfjs/master/workerManager';
 import { Context } from './Context';
@@ -12,7 +9,9 @@ import sr = require('@dcfjs/common/storageRegistry');
 const v8 = require('v8');
 
 export type ParallelTask = (dispachWorker: WorkDispatcher) => any;
-export type PartitionFunc<T> = (paritionId: number) => () => T | Promise<T>;
+export type PartitionFunc<T> = (
+  paritionId: number,
+) => (workerId: string) => T | Promise<T>;
 export type MapperFunc<T, T1> = (input: T[]) => T1[];
 
 let DeprecationWarningPrinted = false;
@@ -55,8 +54,8 @@ export abstract class RDD<T> {
         partitionId => {
           const f = partitionFunc(partitionId);
           return sf.captureEnv(
-            () => {
-              return Promise.resolve(f()).then(v => v.length);
+            (workerId: string) => {
+              return Promise.resolve(f(workerId)).then(v => v.length);
             },
             { f },
           ) as () => Promise<number>;
@@ -80,10 +79,10 @@ export abstract class RDD<T> {
         partitionId => {
           const f = partitionFunc(partitionId);
           return sf.captureEnv(
-            () => {
-              return Promise.resolve(f()).then(v => v.slice(0, count));
+            (workerId: string) => {
+              return Promise.resolve(f(workerId)).then(v => v.slice(0, count));
             },
-            { f },
+            { f, count },
           );
         },
         {
@@ -93,6 +92,7 @@ export abstract class RDD<T> {
         },
       ),
       sf.captureEnv(v => ah.concatArrays(v).slice(0, count), {
+        count,
         ah: sf.requireModule('@dcfjs/common/arrayHelpers'),
       }),
     );
@@ -200,8 +200,8 @@ export abstract class RDD<T> {
         partitionId => {
           const f = partitionFunc(partitionId);
           return sf.captureEnv(
-            () => {
-              return Promise.resolve(f()).then(arr => {
+            workerId => {
+              return Promise.resolve(f(workerId)).then(arr => {
                 let lastRes: T | undefined = arr[0];
 
                 for (let i = 1; i < arr.length; i++) {
@@ -220,15 +220,20 @@ export abstract class RDD<T> {
           sf: sf.requireModule('@dcfjs/common/serializeFunction'),
         },
       ),
-      arr => {
-        arr = arr.filter(v => v !== undefined) as T[];
-        let lastRes: T | undefined = arr[0];
-        for (let i = 1; i < arr.length; i++) {
-          lastRes = reduceFunc(lastRes!, arr[i]!);
-        }
+      sf.captureEnv(
+        arr => {
+          arr = arr.filter(v => v !== undefined) as T[];
+          let lastRes: T | undefined = arr[0];
+          for (let i = 1; i < arr.length; i++) {
+            lastRes = reduceFunc(lastRes!, arr[i]!);
+          }
 
-        return lastRes;
-      },
+          return lastRes;
+        },
+        {
+          reduceFunc,
+        },
+      ),
     );
   }
 
@@ -238,6 +243,10 @@ export abstract class RDD<T> {
       this,
       storageType || this._context.option.defaultStorage,
     );
+  }
+  // cache is only a alias of persist in dcf 2.0
+  cache(storageType?: string): RDD<T> {
+    return this.persist(storageType);
   }
 }
 
@@ -291,8 +300,8 @@ export class MappedRDD<T1, T> extends RDD<T1> {
       partitionId => {
         const f = depFunc(partitionId);
         return sf.captureEnv(
-          () => {
-            return Promise.resolve(f()).then(mapper);
+          (workerId: string) => {
+            return Promise.resolve(f(workerId)).then(mapper);
           },
           {
             f,
@@ -411,14 +420,15 @@ export class CachedRDD<T> extends RDD<T> {
             const f = depFunc(partitionId);
             return [
               sf.captureEnv(
-                async () => {
+                async (workerId: string) => {
+                  const data = await f(workerId);
                   const storage = sr.getTempStorage(storageType);
-                  const data = await f();
                   const key = await storage.generateKey();
                   storage.setItem(key, v8.serialize(data));
                   return key;
                 },
                 {
+                  sr: sf.requireModule('@dcfjs/common/storageRegistry'),
                   v8: sf.requireModule('v8'),
                   f,
                   storageType,
@@ -451,8 +461,10 @@ export class CachedRDD<T> extends RDD<T> {
             return v8.deserialize(storage.getItem(partition));
           },
           {
-            v8: sf.requireModule('v8'),
+            storageType,
             partition,
+            sr: sf.requireModule('@dcfjs/common/storageRegistry'),
+            v8: sf.requireModule('v8'),
           },
         );
       },
@@ -460,7 +472,6 @@ export class CachedRDD<T> extends RDD<T> {
         partitions,
         storageType,
         sf: sf.requireModule('@dcfjs/common/serializeFunction'),
-        sr: sf.requireModule('@dcfjs/common/storageRegistry'),
       },
     );
   }

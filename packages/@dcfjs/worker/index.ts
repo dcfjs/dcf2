@@ -76,7 +76,7 @@ export async function createWorkerServer(
         throw new ServerBadRequestError('Only master can execute scripts.');
       }
       const f = deserializeFunction(func);
-      return f();
+      return f(workerId);
     },
   };
 
