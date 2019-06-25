@@ -250,7 +250,7 @@ export abstract class RDD<T> {
   }
 
   partitionBy(
-    numPartition: number,
+    numPartitions: number,
     partitionFunc: (v: T) => number,
     env?: FunctionEnv,
   ): RDD<T> {
@@ -258,7 +258,105 @@ export abstract class RDD<T> {
       sf.captureEnv(partitionFunc, env);
       envDeprecated();
     }
-    return new RepartitionRDD(this._context, this, numPartition, partitionFunc);
+    return new RepartitionRDD(
+      this._context,
+      this,
+      numPartitions,
+      sf.captureEnv(
+        partitionId =>
+          sf.captureEnv(
+            (data: T[]) => {
+              const regrouped: T[][] = [];
+              for (let i = 0; i < numPartitions; i++) {
+                regrouped[i] = [];
+              }
+
+              for (const item of data) {
+                const parId = partitionFunc(item);
+                regrouped[parId].push(item);
+              }
+              return regrouped;
+            },
+            { numPartitions, partitionFunc },
+          ),
+        {
+          numPartitions,
+          partitionFunc,
+          sf: sf.requireModule('@dcfjs/common/serializeFunction'),
+        },
+      ),
+    );
+  }
+
+  coalesce(numPartitions: number): RDD<T> {
+    const originPartitions = this.getNumPartitions();
+
+    /**
+     * Args for each pieces: [startIndex, [...rates to split current partition expect last]]
+     * For example:
+     * 3 -> 4
+     * [ [0, [0.75, ]],
+     *   [1, [0.5, ]],
+     *   [2, [0.25, ]] ]
+     *
+     * after coalesce, each partition got 0.75 partition origin size:
+     *  part1': 0.75 from part1
+     *  part2': 0.25 from part1(rest) + 0.5 from part2
+     *  part3': 0.5 from part2(rest) + 0.25 from part3
+     *  part4': 0.75 from part4(rest)
+     */
+    const partitionArgs: [number, number[]][] = [];
+    let last: number[] = [];
+    partitionArgs.push([0, last]);
+    const rate = originPartitions / numPartitions;
+
+    let counter = 0;
+    for (let i = 0; i < numPartitions - 1; i++) {
+      counter += rate;
+      while (counter >= 1) {
+        counter -= 1;
+        last = [];
+        partitionArgs.push([i, last]);
+      }
+      last.push(counter);
+    }
+    // manually add last partition to avoid precsion loss.
+    while (partitionArgs.length < originPartitions) {
+      partitionArgs.push([numPartitions - 1, []]);
+    }
+
+    return new RepartitionRDD(
+      this._context,
+      this,
+      numPartitions,
+      sf.captureEnv(
+        partitionId => {
+          const arg = partitionArgs[partitionId];
+          return sf.captureEnv(
+            (data: T[]) => {
+              const ret: any[][] = [];
+              let lastIndex = 0;
+              for (let i = 0; i < arg[0]; i++) {
+                ret.push([]);
+              }
+              for (const rate of arg[1]) {
+                const nextIndex = Math.floor(data.length * rate);
+                ret.push(data.slice(lastIndex, nextIndex));
+                lastIndex = nextIndex;
+              }
+              ret.push(data.slice(lastIndex));
+              return ret;
+            },
+            { numPartitions, arg },
+          );
+        },
+        {
+          numPartitions,
+          partitionArgs,
+          sf: sf.requireModule('@dcfjs/common/serializeFunction'),
+        },
+      ),
+    );
   }
 }
 
@@ -492,12 +590,12 @@ export class CachedRDD<T> extends RDD<T> {
 export class RepartitionRDD<T> extends RDD<T> {
   private _numPartition: number;
   private _dependence: RDD<T>;
-  private _partitionFunc: (v: T) => number;
+  private _partitionFunc: (paritionId: number) => (v: T[]) => T[][];
   constructor(
     context: Context,
     dependence: RDD<T>,
     numPartition: number,
-    partitionFunc: (v: T) => number,
+    partitionFunc: (paritionId: number) => (v: T[]) => T[][],
   ) {
     super(context);
     this._numPartition = numPartition;
@@ -537,25 +635,18 @@ export class RepartitionRDD<T> extends RDD<T> {
       sf.captureEnv(
         (partitionId, tempStorageSession) => {
           const f = depFunc(partitionId);
+          const pf = partitionFunc(partitionId);
           return [
             sf.captureEnv(
               async (workerId: string) => {
                 const data = await f(workerId);
                 const storage = sr.getTempStorage(storageType);
 
-                const regrouped: T[][] = [];
-                for (let i = 0; i < numPartitions; i++) {
-                  regrouped[i] = [];
-                }
-
-                for (const item of data) {
-                  const parId = partitionFunc(item);
-                  regrouped[parId].push(item);
-                }
+                const regrouped: T[][] = pf(data);
 
                 const ret: (string | null)[] = [];
                 for (let i = 0; i < numPartitions; i++) {
-                  if (regrouped[i].length === 0) {
+                  if (!regrouped[i] || regrouped[i].length === 0) {
                     ret.push(null);
                     continue;
                   }
@@ -573,7 +664,7 @@ export class RepartitionRDD<T> extends RDD<T> {
               },
               {
                 f,
-                partitionFunc,
+                pf,
                 numPartitions,
                 repartitionId,
                 storageType,

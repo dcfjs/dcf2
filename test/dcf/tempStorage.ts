@@ -4,7 +4,7 @@ import { releaseAll, autoRelease } from '@dcfjs/common/autoRelease';
 import { createMasterServer } from '@dcfjs/master';
 import { createLocalWorker } from '@dcfjs/worker';
 import { Context, createContext } from '@dcfjs/client/Context';
-import { expect } from 'chai';
+import { expect, assert } from 'chai';
 
 chai.use(chaiAsPromised);
 
@@ -75,5 +75,19 @@ describe('MapReduce With local worker and sharedfs temp storage', () => {
       }
     }
     expect(await tmp.glom().collect()).deep.equals(compare);
+  });
+
+  it('Test coalesce', async () => {
+    const max = 10000;
+    const tmp = dcc.range(0, max, undefined, 4);
+    const tmp1 = tmp.coalesce(5);
+
+    expect(await tmp.collect()).deep.equals(await tmp1.collect());
+    expect((await tmp1.getNumPartitions()) === 5);
+    const sizes = await tmp1
+      .glom()
+      .map(v => v.length)
+      .collect();
+    assert(sizes.every(v => v >= 1990 && v <= 2010));
   });
 });
