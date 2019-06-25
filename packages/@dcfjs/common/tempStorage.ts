@@ -4,9 +4,16 @@ export interface TempStorage {
   getItem(key: string): Buffer | Promise<Buffer>;
   getAndDeleteItem(key: string): Buffer | Promise<Buffer>;
   deleteItem(key: string): void | Promise<void>;
-  generateKey(): string | Promise<void>;
+  generateKey(): string | Promise<string>;
 
+  // Remove outdated data(periodly)
   cleanUp?(): void | Promise<void>;
+
+  // Remove all data(after master/worker restarted.)
+  cleanAll?(): void | Promise<void>;
+
+  // mark a file that should not be auto cleaned in a period.
+  refreshExpired(key: string): void | Promise<void>;
 }
 
 export interface MasterTempStorage extends TempStorage {

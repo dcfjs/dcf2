@@ -13,7 +13,11 @@ import '@dcfjs/common/registerCaptureEnv';
 import { fork } from 'child_process';
 
 import debugFactory from 'debug';
-import { registerTempStorage } from '@dcfjs/common/storageRegistry';
+import {
+  registerTempStorage,
+  removeAllStorages,
+  getStorageEntries,
+} from '@dcfjs/common/storageRegistry';
 
 const debug = debugFactory('worker:cli');
 
@@ -76,8 +80,21 @@ export async function createWorkerServer(
     },
   };
 
+  const timer = setInterval(() => {
+    for (const [key, storage] of getStorageEntries()) {
+      if (storage.cleanUp) {
+        storage.cleanUp();
+      }
+    }
+  }, 60000);
+
   const server = await createServer(ServerHandlers, option);
   endpoint = server.endpoint;
+
+  server.on('close', () => {
+    clearInterval(timer);
+    removeAllStorages();
+  });
 
   // Register worker.
   await registerWorker(masterEndpoint, server.endpoint, workerSecret);

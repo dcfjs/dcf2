@@ -9,19 +9,6 @@ import { RDD } from '@dcfjs/client';
 
 chai.use(chaiAsPromised);
 
-function isPrime(v: number) {
-  if (v < 2) {
-    return false;
-  }
-  const max = Math.sqrt(v) + 0.5;
-  for (let i = 2; i < max; i++) {
-    if (v % i === 0) {
-      return false;
-    }
-  }
-  return true;
-}
-
 describe('MapReduce With local worker', () => {
   let dcc: Context;
 

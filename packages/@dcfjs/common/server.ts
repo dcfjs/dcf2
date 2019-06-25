@@ -51,6 +51,9 @@ export class Server extends EventEmitter {
     super();
     this._server = server;
 
+    server.on('close', (...args) => {
+      this.emit('close', ...args);
+    });
     server.on('session', (sess: CustomSession) => {
       sess.setTimeout(0);
       sess.id = this._sessions.length;

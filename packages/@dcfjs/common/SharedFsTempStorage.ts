@@ -17,13 +17,13 @@ export class SharedFsTempStorage implements TempStorage {
   protected _keyItor = iterator();
 
   constructor(basePath: string, workerId?: string) {
-    this._prefix = workerId ? `` : 'master:';
+    this._prefix = workerId ? `worker-${workerId}-` : 'master-';
     this._basePath = path.resolve(basePath);
   }
 
   protected resolve(key: string) {
     if (/[\.\/\\]/.test(key)) {
-      throw new Error('Invalid key.');
+      throw new Error('Invalid key `' + key + '`');
     }
     return path.resolve(this._basePath, key);
   }
@@ -47,35 +47,56 @@ export class SharedFsTempStorage implements TempStorage {
   }
 
   deleteItem(key: string) {
-    fs.unlinkSync(this.resolve(key));
+    const path = this.resolve(key);
+    if (fs.existsSync(path)) {
+      fs.unlinkSync(path);
+    }
   }
 
   generateKey() {
     return this._prefix + this._keyItor();
   }
+
+  refreshExpired(key: string) {
+    const now = new Date();
+    fs.utimesSync(this.resolve(key), now, now);
+  }
 }
 
 export class SharedFsTempMasterStorage extends SharedFsTempStorage
   implements MasterTempStorage {
+  // TODO: move this to config.
+  expireAfter: number = 3600000;
   constructor(basePath: string) {
     super(basePath);
   }
 
-  // only cleanup at worker side.
   cleanUp() {
+    const expired = Date.now() - this.expireAfter;
+
+    for (const fn of fs.readdirSync(this._basePath)) {
+      const path = this.resolve(fn);
+      if (fs.statSync(path).mtimeMs < expired) {
+        fs.unlinkSync(path);
+      }
+    }
+  }
+
+  // only cleanup at master side.
+  cleanAll() {
     if (!fs.existsSync(this._basePath)) {
       fs.mkdirSync(this._basePath);
       return;
     }
     for (const fn of fs.readdirSync(this._basePath)) {
-      this.deleteItem(fn);
+      fs.unlinkSync(this.resolve(fn));
     }
   }
 
   getFactory() {
     const basePath = this._basePath;
     return captureEnv(
-      workerId =>
+      ({ workerId }) =>
         new (require('@dcfjs/common/SharedFsTempStorage')).SharedFsTempStorage(
           basePath,
           workerId,

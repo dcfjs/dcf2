@@ -1,4 +1,4 @@
-import { CleanupFunction } from './../common/autoRelease';
+import { CleanupFunction, autoRelease } from './../common/autoRelease';
 import {
   createServer,
   ServerHandlerMap,
@@ -15,39 +15,41 @@ import { deserializeFunction } from '@dcfjs/common/serializeFunction';
 import '@dcfjs/common/registerCaptureEnv';
 import { ServerHttp2Stream, ServerHttp2Session } from 'http2';
 import { TempStorage } from '@dcfjs/common/tempStorage';
-import { registerTempStorage } from '@dcfjs/common/storageRegistry';
+import {
+  registerTempStorage,
+  TempStorageSession,
+  removeAllStorages,
+  getStorageEntries,
+} from '@dcfjs/common/storageRegistry';
 
 export type ExecTask = (
   dispatchWork: WorkDispatcher,
   createPushStream: (path: string) => Promise<ServerHttp2Stream>,
-  autoRelease: (func: CleanupFunction) => void,
+  tempStorageSession: TempStorageSession,
 ) => any | Promise<any>;
 
-type Http2SessionWithAutoRelease = ServerHttp2Session & {
-  autoRelease?: (func: CleanupFunction) => void;
+type Http2SessionCustom = ServerHttp2Session & {
+  tempStorageSession?: TempStorageSession;
 };
 
 const ServerHandlers: ServerHandlerMap = {
   '/worker/register': handleRegisterWorker,
   '/worker/status': getWorkerStatus,
   '/exec': async (func, _sess, stream) => {
-    const sess = _sess as Http2SessionWithAutoRelease;
-    let autoRelease = sess.autoRelease;
-    if (!autoRelease) {
-      const release: CleanupFunction[] = [];
-      autoRelease = sess.autoRelease = func => {
-        release.push(func);
-      };
+    const sess = _sess as Http2SessionCustom;
+    if (!sess.tempStorageSession) {
+      sess.tempStorageSession = new TempStorageSession();
       sess.on('close', async () => {
-        while (release.length > 0) {
-          await release.pop()!();
+        if (sess.tempStorageSession) {
+          sess.tempStorageSession.close();
+          sess.tempStorageSession = undefined;
         }
       });
     }
 
     const f = deserializeFunction(func);
     const createPushStream = (path: string) => pushStream(stream, path);
-    return await f(dispatchWork, createPushStream, autoRelease);
+    return await f(dispatchWork, createPushStream, sess.tempStorageSession!);
   },
 };
 
@@ -62,12 +64,25 @@ export async function createMasterServer(config?: ServerConfig) {
         factory = factory.default;
       }
       const storage: TempStorage = factory(storageConfig.options);
-      if (storage.cleanUp) {
-        await storage.cleanUp();
+      if (storage.cleanAll) {
+        await storage.cleanAll();
       }
       registerTempStorage(storageConfig.name, storage);
     }
   }
 
-  return createServer(ServerHandlers, config);
+  const timer = setInterval(() => {
+    for (const [key, storage] of getStorageEntries()) {
+      if (storage.cleanUp) {
+        storage.cleanUp();
+      }
+    }
+  }, 60000);
+
+  const server = await createServer(ServerHandlers, config);
+  server.on('close', () => {
+    clearInterval(timer);
+    removeAllStorages();
+  });
+  return server;
 }

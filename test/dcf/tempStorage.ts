@@ -5,7 +5,6 @@ import { createMasterServer } from '@dcfjs/master';
 import { createLocalWorker } from '@dcfjs/worker';
 import { Context, createContext } from '@dcfjs/client/Context';
 import { expect } from 'chai';
-import { RDD } from '@dcfjs/client';
 
 chai.use(chaiAsPromised);
 
@@ -22,7 +21,7 @@ function isPrime(v: number) {
   return true;
 }
 
-describe('MapReduce With local worker', () => {
+describe('MapReduce With local worker and sharedfs temp storage', () => {
   let dcc: Context;
 
   before(async () => {
@@ -49,5 +48,12 @@ describe('MapReduce With local worker', () => {
     context = null!;
   });
 
-  it('Nothing', () => {});
+  it('Test cached pieces', async () => {
+    const primes1 = dcc.range(0, 100000).filter(isPrime);
+
+    const primes2 = primes1.persist('disk');
+
+    expect(await primes1.count()).equals(await primes2.count());
+    expect(await primes1.collect()).deep.equals(await primes2.collect());
+  });
 });

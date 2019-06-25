@@ -1,3 +1,6 @@
+import { TempStorageSession } from './../common/storageRegistry';
+import { CleanupFunction } from './../common/autoRelease';
+import { UnionRDD } from './RDD';
 /**
  * @noCaptureEnv
  */
@@ -13,11 +16,13 @@ const v8 = require('v8');
 export interface ContextOption {
   showProgress: boolean;
   defaultPartitions: number;
+  defaultStorage: string;
 }
 
 const defaultOption: ContextOption = {
   showProgress: !!process.stdout.isTTY,
   defaultPartitions: 4,
+  defaultStorage: 'disk',
 };
 
 export class Context {
@@ -72,13 +77,26 @@ export class Context {
     });
   }
 
+  get client() {
+    return this._client;
+  }
+
+  get option() {
+    return this._option;
+  }
+
   close(): Promise<void> {
     return this._client.close();
   }
 
-  execute<T, T1>(
+  execute<T, T1, T2 = any>(
     numPartitions: number,
-    partitionFunc: PartitionFunc<T>,
+    partitionFunc: (
+      paritionId: number,
+      tempStorageSession: TempStorageSession,
+    ) =>
+      | (() => T | Promise<T>) // single function runs on worker.
+      | ([() => T2 | Promise<T2>, (arg: T2) => T | Promise<T>]), // first function run on worker, second function run on master
     finalFunc: (v: T[]) => T1 | Promise<T1>,
   ): Promise<T1> {
     const { showProgress } = this._option;
@@ -87,7 +105,7 @@ export class Context {
       '/exec',
       sf.serializeFunction(
         sf.captureEnv(
-          (async (dispatchWork, createPushStream) => {
+          (async (dispatchWork, createPushStream, tempStorageSession) => {
             let sendProgress: (current: number, total: number) => void;
             let stream: http2.ServerHttp2Stream | undefined;
             if (showProgress) {
@@ -113,9 +131,13 @@ export class Context {
             }
 
             const partitionResults = await Promise.all(
-              new Array(numPartitions)
-                .fill(0)
-                .map((v, i) => tickAfter(dispatchWork(partitionFunc(i)))),
+              new Array(numPartitions).fill(0).map((v, i) => {
+                const f = partitionFunc(i, tempStorageSession);
+                if (Array.isArray(f)) {
+                  return tickAfter(dispatchWork(f[0]).then(f[1]));
+                }
+                return tickAfter(dispatchWork(f));
+              }),
             );
 
             if (stream) {
@@ -230,31 +252,7 @@ export class Context {
   }
 
   union<T>(...rdds: RDD<T>[]): RDD<T> {
-    const partitionCounts = rdds.map(v => v.getNumPartitions());
-    const rddFuncs = rdds.map(v => v.getFunc());
-    const totalPartitions = partitionCounts.reduce((a, b) => a + b, 0);
-
-    return new GeneratedRDD<T>(
-      this,
-      totalPartitions,
-      sf.captureEnv(
-        partitionId => {
-          for (let i = 0; i < partitionCounts.length; i++) {
-            if (partitionId < partitionCounts[i]) {
-              return rddFuncs[i](partitionId);
-            }
-            partitionId -= partitionCounts[i];
-          }
-          // `partitionId` should be less than totalPartitions.
-          // so it should not reach here.
-          throw new Error('Internal error.');
-        },
-        {
-          partitionCounts,
-          rddFuncs,
-        },
-      ),
-    );
+    return new UnionRDD<T>(this, rdds);
   }
 }
 
