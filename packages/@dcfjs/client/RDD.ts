@@ -13,6 +13,7 @@ export type PartitionFunc<T> = (
   paritionId: number,
 ) => (workerId: string) => T | Promise<T>;
 export type MapperFunc<T, T1> = (input: T[]) => T1[];
+export type ComparableType = string | number;
 
 let DeprecationWarningPrinted = false;
 const envDeprecatedMsg =
@@ -587,6 +588,166 @@ export class CachedRDD<T> extends RDD<T> {
   }
 }
 
+async function getRepartitionFunc<T>(
+  context: Context,
+  dependence: RDD<T>,
+  numPartitions: number,
+  partitionFunc: (paritionId: number) => (v: T[]) => T[][],
+): Promise<PartitionFunc<T[]>> {
+  const storageType = context.option.defaultRepartitionStorage;
+
+  const depPartitions = dependence.getNumPartitions();
+  const depFunc = await dependence.getFunc();
+
+  const repartitionId = await context.client.post<string>(
+    '/exec',
+    sf.serializeFunction(
+      sf.captureEnv(
+        (() => {
+          return sr.getTempStorage(storageType).generateKey();
+        }) as ExecTask,
+        {
+          sr: sf.requireModule('@dcfjs/common/storageRegistry'),
+          storageType,
+        },
+      ),
+    ),
+  );
+
+  const pieces = await context.execute(
+    depPartitions,
+    sf.captureEnv(
+      (partitionId, tempStorageSession) => {
+        const f = depFunc(partitionId);
+        const pf = partitionFunc(partitionId);
+        return [
+          sf.captureEnv(
+            async (workerId: string) => {
+              const data = await f(workerId);
+              const storage = sr.getTempStorage(storageType);
+
+              const regrouped: T[][] = pf(data);
+
+              const ret: (string | null)[] = [];
+              for (let i = 0; i < numPartitions; i++) {
+                if (!regrouped[i] || regrouped[i].length === 0) {
+                  ret.push(null);
+                  continue;
+                }
+                const key = `${repartitionId}-${workerId}-${i}`;
+                const buf: Buffer = v8.serialize(regrouped[i]);
+                const len = Buffer.allocUnsafe(4);
+                len.writeUInt32LE(buf.length, 0);
+
+                await storage.appendItem(key, Buffer.concat([len, buf]));
+
+                ret.push(key);
+              }
+
+              return ret;
+            },
+            {
+              f,
+              pf,
+              numPartitions,
+              repartitionId,
+              storageType,
+              sr: sf.requireModule('@dcfjs/common/storageRegistry'),
+              v8: sf.requireModule('v8'),
+            },
+          ),
+          (keys: (string | null)[]) => {
+            for (const key of keys) {
+              if (key) {
+                tempStorageSession.addRef(storageType, key);
+              }
+            }
+            return keys;
+          },
+        ];
+      },
+      {
+        sf: sf.requireModule('@dcfjs/common/serializeFunction'),
+        numPartitions,
+        repartitionId,
+        partitionFunc,
+        storageType,
+        depFunc,
+      },
+    ),
+    sf.captureEnv(
+      arr => {
+        // transposition matrix with new partition
+        const ret: (string | null)[][] = [];
+        for (let i = 0; i < numPartitions; i++) {
+          ret[i] = [];
+          for (let j = 0; j < depPartitions; j++) {
+            ret[i][j] = arr[j][i];
+          }
+        }
+        return ret;
+      },
+      {
+        numPartitions,
+        depPartitions,
+      },
+    ),
+  );
+
+  return sf.captureEnv(
+    partitionId => {
+      const partPieces = pieces[partitionId];
+      // TODO: use execution context to release references.
+
+      return sf.captureEnv(
+        async () => {
+          const storage = sr.getTempStorage(storageType);
+          const dataByKey: { [key: string]: T[][] } = {};
+          for (let i = 0; i < partPieces.length; i++) {
+            const key = partPieces[i];
+            if (key && !dataByKey[key]) {
+              const allBuf = await storage.getAndDeleteItem(key);
+              let position = 0;
+              const tmp: T[][] = [];
+              while (position < allBuf.length) {
+                const len = allBuf.readUInt32LE(position);
+                position += 4;
+                const buf = allBuf.slice(position, position + len);
+                position += len;
+                tmp.push(v8.deserialize(buf));
+              }
+              dataByKey[key] = tmp;
+            }
+          }
+          const parts: T[][] = [];
+          for (let i = 0; i < partPieces.length; i++) {
+            const key = partPieces[i];
+            if (key) {
+              parts.push(dataByKey[key].shift()!);
+            }
+          }
+          return ah.concatArrays(parts);
+        },
+        {
+          partPieces,
+          storageType,
+          depPartitions,
+          sr: sf.requireModule('@dcfjs/common/storageRegistry'),
+          v8: sf.requireModule('v8'),
+          ah: sf.requireModule('@dcfjs/common/arrayHelpers'),
+        },
+      );
+    },
+    {
+      sf: sf.requireModule('@dcfjs/common/serializeFunction'),
+      storageType,
+      numPartitions,
+      depPartitions,
+      pieces,
+    },
+  );
+}
+
 export class RepartitionRDD<T> extends RDD<T> {
   private _numPartition: number;
   private _dependence: RDD<T>;
@@ -608,159 +769,124 @@ export class RepartitionRDD<T> extends RDD<T> {
   }
 
   async getFunc(): Promise<PartitionFunc<T[]>> {
+    return getRepartitionFunc(
+      this._context,
+      this._dependence,
+      this._numPartition,
+      this._partitionFunc,
+    );
+  }
+}
+
+export class SortedRDD<T, K extends ComparableType> extends RDD<T> {
+  private _numPartition: number;
+  private _dependence: RDD<T>;
+  private _keyFunc: (data: T) => K;
+
+  constructor(
+    context: Context,
+    dependence: RDD<T>,
+    numPartition: number,
+    keyFunc: (data: T) => K,
+  ) {
+    super(context);
+    this._numPartition = numPartition;
+    this._dependence = dependence;
+    this._numPartition = numPartition;
+    this._keyFunc = keyFunc;
+  }
+
+  getNumPartitions() {
+    return this._numPartition;
+  }
+
+  async getFunc(): Promise<(partitionId: number) => (workerId: string) => T[]> {
+    let cachedDependence: CachedRDD<T>;
     const storageType = this._context.option.defaultRepartitionStorage;
 
-    const depPartitions = this._dependence.getNumPartitions();
-    const depFunc = await this._dependence.getFunc();
-    const numPartitions = this._numPartition;
-    const partitionFunc = this._partitionFunc;
+    // Step1: cache if needed.
+    if (this._dependence instanceof CachedRDD) {
+      cachedDependence = this._dependence;
+    } else {
+      cachedDependence = this._dependence.persist(storageType) as CachedRDD<T>;
+    }
 
-    const repartitionId = await this._context.client.post<string>(
-      '/exec',
-      sf.serializeFunction(
-        sf.captureEnv(
-          (() => {
-            return sr.getTempStorage(storageType).generateKey();
-          }) as ExecTask,
-          {
-            sr: sf.requireModule('@dcfjs/common/storageRegistry'),
-            storageType,
-          },
-        ),
-      ),
-    );
+    // Step 2:
+    // sample with 1/n fraction where n is origin partition count
+    // so we get a sample count near to a single partition.
+    // Sample contains partitionIndex & localIndex to avoid performance inssue
+    // when dealing with too many same values.
+    const originPartitions = cachedDependence.getNumPartitions();
+    const originFunc = await cachedDependence.getFunc();
 
-    const pieces = await this._context.execute(
-      depPartitions,
+    const keyFunc = this._keyFunc;
+
+    const samples = await this._context.execute(
+      originPartitions,
       sf.captureEnv(
-        (partitionId, tempStorageSession) => {
-          const f = depFunc(partitionId);
-          const pf = partitionFunc(partitionId);
-          return [
-            sf.captureEnv(
-              async (workerId: string) => {
-                const data = await f(workerId);
-                const storage = sr.getTempStorage(storageType);
+        partitionId => {
+          const f = originFunc(partitionId);
 
-                const regrouped: T[][] = pf(data);
-
-                const ret: (string | null)[] = [];
-                for (let i = 0; i < numPartitions; i++) {
-                  if (!regrouped[i] || regrouped[i].length === 0) {
-                    ret.push(null);
-                    continue;
-                  }
-                  const key = `${repartitionId}-${workerId}-${i}`;
-                  const buf: Buffer = v8.serialize(regrouped[i]);
-                  const len = Buffer.allocUnsafe(4);
-                  len.writeUInt32LE(buf.length, 0);
-
-                  await storage.appendItem(key, Buffer.concat([len, buf]));
-
-                  ret.push(key);
-                }
-
-                return ret;
-              },
-              {
-                f,
-                pf,
-                numPartitions,
-                repartitionId,
-                storageType,
-                sr: sf.requireModule('@dcfjs/common/storageRegistry'),
-                v8: sf.requireModule('v8'),
-              },
-            ),
-            (keys: (string | null)[]) => {
-              for (const key of keys) {
-                if (key) {
-                  tempStorageSession.addRef(storageType, key);
+          return sf.captureEnv(
+            async (workerId: string) => {
+              const v = await f(workerId);
+              const ret = [];
+              for (let i = 0; i < v.length; i++) {
+                if (Math.random() * originPartitions < 1) {
+                  ret.push([keyFunc(v[i]), partitionId, i] as [
+                    K,
+                    number,
+                    number
+                  ]);
                 }
               }
-              return keys;
+              return ret;
             },
-          ];
+            { f, partitionId, keyFunc },
+          );
         },
         {
-          sf: sf.requireModule('@dcfjs/common/serializeFunction'),
-          numPartitions,
-          repartitionId,
-          partitionFunc,
-          storageType,
-          depFunc,
+          originFunc,
+          keyFunc,
         },
       ),
       sf.captureEnv(
         arr => {
-          // transposition matrix with new partition
-          const ret: (string | null)[][] = [];
-          for (let i = 0; i < numPartitions; i++) {
-            ret[i] = [];
-            for (let j = 0; j < depPartitions; j++) {
-              ret[i][j] = arr[j][i];
-            }
-          }
-          return ret;
+          return ah.concatArrays(arr);
         },
         {
-          numPartitions,
-          depPartitions,
+          ah: sf.requireModule('@dcfjs/common/arrayHelpers'),
         },
       ),
     );
 
-    return sf.captureEnv(
-      partitionId => {
-        const partPieces = pieces[partitionId];
-        // TODO: use execution context to release references.
+    // Step 3: sort samples, and get seperate points.
+    samples.sort((a, b) => {
+      if (a[0] !== b[0]) {
+        return a[0] < b[0] ? -1 : 1;
+      }
+      if (a[1] !== b[1]) {
+        return a[1] < b[1] ? -1 : 1;
+      }
+      return a[2] < b[2] ? -1 : 1;
+    });
 
-        return sf.captureEnv(
-          async () => {
-            const storage = sr.getTempStorage(storageType);
-            const dataByKey: { [key: string]: T[][] } = {};
-            for (let i = 0; i < partPieces.length; i++) {
-              const key = partPieces[i];
-              if (key && !dataByKey[key]) {
-                const allBuf = await storage.getAndDeleteItem(key);
-                let position = 0;
-                const tmp: T[][] = [];
-                while (position < allBuf.length) {
-                  const len = allBuf.readUInt32LE(position);
-                  position += 4;
-                  const buf = allBuf.slice(position, position + len);
-                  position += len;
-                  tmp.push(v8.deserialize(buf));
-                }
-                dataByKey[key] = tmp;
-              }
-            }
-            const parts: T[][] = [];
-            for (let i = 0; i < partPieces.length; i++) {
-              const key = partPieces[i];
-              if (key) {
-                parts.push(dataByKey[key].shift()!);
-              }
-            }
-            return ah.concatArrays(parts);
-          },
-          {
-            partPieces,
-            storageType,
-            depPartitions,
-            sr: sf.requireModule('@dcfjs/common/storageRegistry'),
-            v8: sf.requireModule('v8'),
-            ah: sf.requireModule('@dcfjs/common/arrayHelpers'),
-          },
-        );
-      },
-      {
-        sf: sf.requireModule('@dcfjs/common/serializeFunction'),
-        storageType,
-        numPartitions,
-        depPartitions,
-        pieces,
-      },
-    );
+    // get n-1 points in samples.
+    const numPartitions = this._numPartition;
+    const points: [any, number, number][] = [];
+    let p = samples.length / numPartitions;
+    for (let i = 1; i < numPartitions; i++) {
+      let idx = Math.floor(p * i);
+      if (idx < samples.length) {
+        points.push(samples[idx]);
+      }
+    }
+
+    throw Error('Working');
+    // Step 4: Repartition by points.
+
+    if (this._dependence === cachedDependence) {
+      cachedDependence.unpersist();
+    }
   }
 }
