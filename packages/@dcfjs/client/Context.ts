@@ -14,13 +14,15 @@ const v8 = require('v8');
 export interface ContextOption {
   showProgress: boolean;
   defaultPartitions: number;
-  defaultStorage: string;
+  defaultPersistStorage: string;
+  defaultRepartitionStorage: string;
 }
 
 const defaultOption: ContextOption = {
   showProgress: !!process.stdout.isTTY,
   defaultPartitions: 4,
-  defaultStorage: 'disk',
+  defaultPersistStorage: 'disk',
+  defaultRepartitionStorage: 'disk',
 };
 
 export class Context {

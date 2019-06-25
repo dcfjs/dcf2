@@ -48,12 +48,32 @@ describe('MapReduce With local worker and sharedfs temp storage', () => {
     context = null!;
   });
 
-  it('Test cached pieces', async () => {
+  it('Test persist', async () => {
     const primes1 = dcc.range(0, 100000).filter(isPrime);
 
     const primes2 = primes1.persist('disk');
 
     expect(await primes1.count()).equals(await primes2.count());
     expect(await primes1.collect()).deep.equals(await primes2.collect());
+  });
+
+  it('Test repartitionBy', async () => {
+    const max = 100000;
+    const tmp = dcc
+      .range(0, max)
+      .partitionBy(3, v => v % 3)
+      .cache();
+
+    expect(await tmp.count()).equals(max);
+    const compare: number[][] = [];
+    for (let i = 0; i < 3; i++) {
+      compare[i] = [];
+      for (let j = 0; j < max; j++) {
+        if (j % 3 === i) {
+          compare[i].push(j);
+        }
+      }
+    }
+    expect(await tmp.glom().collect()).deep.equals(compare);
   });
 });
