@@ -54,5 +54,12 @@ describe('MapReduce With local worker', () => {
         .sortBy(v => v[0])
         .collect(),
     ).deep.equals([...tmp].sort((a, b) => a[0] - b[0]));
+
+    expect(
+      await dcc
+        .parallelize(tmp)
+        .sortBy(v => v[0], false)
+        .collect(),
+    ).deep.equals([...tmp].sort((a, b) => b[0] - a[0]));
   });
 });

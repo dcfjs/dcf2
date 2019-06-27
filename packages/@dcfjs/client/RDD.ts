@@ -912,7 +912,7 @@ export class SortedRDD<T, K extends ComparableType> extends RDD<T> {
       ),
     );
 
-    const ascending = this._ascending ? 1 : -1;
+    const ascending = this._ascending;
 
     // Step 3: sort samples, and get seperate points.
     samples.sort((a, b) => {
@@ -958,7 +958,7 @@ export class SortedRDD<T, K extends ComparableType> extends RDD<T> {
               const tmp = v.map((item, i) => [keyFunc(item), i] as [K, number]);
               tmp.sort((a, b) => {
                 if (a[0] !== b[0]) {
-                  return a[0] < b[0] ? -1 : 1;
+                  return (a[0] < b[0] ? -1 : 1) * (ascending ? 1 : -1);
                 }
                 return a[1] < b[1] ? -1 : 1;
               });
@@ -966,10 +966,14 @@ export class SortedRDD<T, K extends ComparableType> extends RDD<T> {
               for (const [key, i] of tmp) {
                 // compare with points
                 for (; index < points.length; ) {
-                  if (key < points[index][0]) {
+                  if (
+                    ascending ? key < points[index][0] : key > points[index][0]
+                  ) {
                     break;
                   }
-                  if (key > points[index][0]) {
+                  if (
+                    ascending ? key > points[index][0] : key < points[index][0]
+                  ) {
                     index++;
                     continue;
                   }
@@ -994,6 +998,7 @@ export class SortedRDD<T, K extends ComparableType> extends RDD<T> {
               numPartitions,
               partitionId,
               points,
+              ascending,
             },
           );
         },
@@ -1002,6 +1007,7 @@ export class SortedRDD<T, K extends ComparableType> extends RDD<T> {
           keyFunc,
           numPartitions,
           points,
+          ascending,
         },
       ),
     );
