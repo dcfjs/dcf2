@@ -72,4 +72,19 @@ describe('SerializeFunction', () => {
     const f1 = deserializeFunction(serializeFunction(f));
     expect(f1()).to.equal(f());
   });
+
+  it('Override global name', () => {
+    const Buffer = 1;
+    const f = () => Buffer;
+    const f1 = deserializeFunction(serializeFunction(f));
+    expect(f1()).to.equal(f());
+  });
+
+  // This test case is not expected, because Buffer was changed(undefined -> 1) after function declared.
+  // it('Override global name by var', () => {
+  //   const f = () => Buffer;
+  //   var Buffer = 1;
+  //   const f1 = deserializeFunction(serializeFunction(f));
+  //   expect(f1()).to.equal(f());
+  // });
 });
