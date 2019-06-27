@@ -102,7 +102,10 @@ export class Context {
     ) =>
       | ((workerId: string) => T | Promise<T>) // single function runs on worker.
       | ([(workerId: string) => T2 | Promise<T2>, (arg: T2) => T | Promise<T>]), // first function run on worker, second function run on master
-    finalFunc: (v: T[]) => T1 | Promise<T1>,
+    finalFunc: (
+      v: T[],
+      tempStorageSession: TempStorageSession,
+    ) => T1 | Promise<T1>,
   ): Promise<T1> {
     const { showProgress } = this._option;
     const postClientWorks = this._postClientWorks.splice(0);
@@ -149,7 +152,7 @@ export class Context {
             if (stream) {
               await new Promise(resolve => stream!.end(resolve));
             }
-            return finalFunc(partitionResults);
+            return finalFunc(partitionResults, tempStorageSession);
           }) as ExecTask,
           {
             numPartitions,

@@ -398,5 +398,5 @@ describe('MapReduce With local worker and sharedfs temp storage', () => {
     expect(await tmp2.max()).equals(max - 1);
     expect(await tmp2.min()).equals(0);
     expect(await tmp2.reduce((a, b) => a + b)).equals(4999950000 + 312487500);
-  });
+  }).timeout(10000);
 });

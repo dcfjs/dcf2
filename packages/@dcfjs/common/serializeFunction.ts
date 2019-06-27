@@ -131,28 +131,34 @@ export function deserializeFunction<T extends (...args: any[]) => any>(
 ): T {
   let ret;
   const valueMap = f.values.map(v => deserializeValue(v));
-  if (noWrap) {
-    ret = new Function(
-      'require',
-      '__args',
-      `const [${f.args.join(',')}] = __args;
+  try {
+    if (noWrap) {
+      ret = new Function(
+        'require',
+        '__args',
+        `const [${f.args.join(',')}] = __args;
   return ${f.source}`,
-    )(require, valueMap);
-  } else {
-    ret = new Function(
-      'require',
-      '__wrap',
-      '__args',
-      `const [${f.args.join(',')}] = __args;
+      )(require, valueMap);
+    } else {
+      ret = new Function(
+        'require',
+        '__wrap',
+        '__args',
+        `const [${f.args.join(',')}] = __args;
 return __wrap(${f.source})`,
-    )(require, wrap, valueMap);
+      )(require, wrap, valueMap);
+    }
+    Object.defineProperty(ret, '__serialized', {
+      value: f,
+      enumerable: false,
+      configurable: false,
+    });
+    return ret;
+  } catch (e) {
+    throw new Error(
+      'Error while deserializing function ' + f.source + '\n' + e.stack,
+    );
   }
-  Object.defineProperty(ret, '__serialized', {
-    value: f,
-    enumerable: false,
-    configurable: false,
-  });
-  return ret;
 }
 
 export function captureEnv<T extends (...args: any[]) => any>(
