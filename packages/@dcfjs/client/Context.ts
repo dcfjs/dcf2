@@ -28,6 +28,7 @@ const defaultOption: ContextOption = {
 export class Context {
   private _client: Client;
   private _option: ContextOption;
+  private _postClientWorks: (() => void | Promise<void>)[] = [];
 
   constructor(client: Client, option?: Partial<ContextOption>) {
     this._client = client;
@@ -85,11 +86,15 @@ export class Context {
     return this._option;
   }
 
+  postClientWork(f: () => void | Promise<void>) {
+    this._postClientWorks.push(f);
+  }
+
   close(): Promise<void> {
     return this._client.close();
   }
 
-  execute<T, T1, T2 = any>(
+  async execute<T, T1, T2 = any>(
     numPartitions: number,
     partitionFunc: (
       paritionId: number,
@@ -100,8 +105,9 @@ export class Context {
     finalFunc: (v: T[]) => T1 | Promise<T1>,
   ): Promise<T1> {
     const { showProgress } = this._option;
+    const postClientWorks = this._postClientWorks.splice(0);
 
-    return this._client.post<T1>(
+    const ret = await this._client.post<T1>(
       '/exec',
       sf.serializeFunction(
         sf.captureEnv(
@@ -155,6 +161,10 @@ export class Context {
         ),
       ),
     );
+    for (const work of postClientWorks) {
+      await work();
+    }
+    return ret;
   }
 
   emptyRDD(): RDD<never> {

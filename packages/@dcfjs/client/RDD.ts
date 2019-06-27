@@ -238,7 +238,7 @@ export abstract class RDD<T> {
     );
   }
 
-  persist(storageType?: string): RDD<T> {
+  persist(storageType?: string): CachedRDD<T> {
     return new CachedRDD(
       this._context,
       this,
@@ -246,7 +246,7 @@ export abstract class RDD<T> {
     );
   }
   // cache is only a alias of persist in dcf 2.0
-  cache(storageType?: string): RDD<T> {
+  cache(storageType?: string): CachedRDD<T> {
     return this.persist(storageType);
   }
 
@@ -357,6 +357,29 @@ export abstract class RDD<T> {
           sf: sf.requireModule('@dcfjs/common/serializeFunction'),
         },
       ),
+    );
+  }
+
+  sort<K extends ComparableType>(
+    this: RDD<K>,
+    ascending: boolean = true,
+    numPartitions?: number,
+  ) {
+    return this.sortBy(v => v, ascending, numPartitions);
+  }
+
+  sortBy<K extends ComparableType>(
+    keyFunc: (data: T) => K,
+    ascending: boolean = true,
+    numPartitions?: number,
+    env?: FunctionEnv,
+  ): RDD<T> {
+    return new SortedRDD<T, K>(
+      this._context,
+      this,
+      numPartitions || this._context.option.defaultPartitions,
+      keyFunc,
+      ascending,
     );
   }
 }
@@ -588,12 +611,12 @@ export class CachedRDD<T> extends RDD<T> {
   }
 }
 
-async function getRepartitionFunc<T>(
+async function getRepartitionFunc<T, T1 = T>(
   context: Context,
   dependence: RDD<T>,
   numPartitions: number,
-  partitionFunc: (paritionId: number) => (v: T[]) => T[][],
-): Promise<PartitionFunc<T[]>> {
+  partitionFunc: (paritionId: number) => (v: T[]) => T1[][],
+): Promise<PartitionFunc<T1[]>> {
   const storageType = context.option.defaultRepartitionStorage;
 
   const depPartitions = dependence.getNumPartitions();
@@ -626,7 +649,7 @@ async function getRepartitionFunc<T>(
               const data = await f(workerId);
               const storage = sr.getTempStorage(storageType);
 
-              const regrouped: T[][] = pf(data);
+              const regrouped: T1[][] = pf(data);
 
               const ret: (string | null)[] = [];
               for (let i = 0; i < numPartitions; i++) {
@@ -694,6 +717,30 @@ async function getRepartitionFunc<T>(
     ),
   );
 
+  // remove pieces after current work.
+  context.postClientWork(() => {
+    context.client.post(
+      '/exec',
+      sf.serializeFunction(
+        sf.captureEnv(
+          ((_, _1, tempStorageSession) => {
+            for (const partition of pieces) {
+              for (const piece of partition) {
+                if (piece) {
+                  tempStorageSession.release(storageType, piece);
+                }
+              }
+            }
+          }) as ExecTask,
+          {
+            pieces,
+            storageType,
+          },
+        ),
+      ),
+    );
+  });
+
   return sf.captureEnv(
     partitionId => {
       const partPieces = pieces[partitionId];
@@ -702,13 +749,13 @@ async function getRepartitionFunc<T>(
       return sf.captureEnv(
         async () => {
           const storage = sr.getTempStorage(storageType);
-          const dataByKey: { [key: string]: T[][] } = {};
+          const dataByKey: { [key: string]: T1[][] } = {};
           for (let i = 0; i < partPieces.length; i++) {
             const key = partPieces[i];
             if (key && !dataByKey[key]) {
               const allBuf = await storage.getAndDeleteItem(key);
               let position = 0;
-              const tmp: T[][] = [];
+              const tmp: T1[][] = [];
               while (position < allBuf.length) {
                 const len = allBuf.readUInt32LE(position);
                 position += 4;
@@ -719,7 +766,7 @@ async function getRepartitionFunc<T>(
               dataByKey[key] = tmp;
             }
           }
-          const parts: T[][] = [];
+          const parts: T1[][] = [];
           for (let i = 0; i < partPieces.length; i++) {
             const key = partPieces[i];
             if (key) {
@@ -782,25 +829,28 @@ export class SortedRDD<T, K extends ComparableType> extends RDD<T> {
   private _numPartition: number;
   private _dependence: RDD<T>;
   private _keyFunc: (data: T) => K;
+  private _ascending: boolean;
 
   constructor(
     context: Context,
     dependence: RDD<T>,
     numPartition: number,
     keyFunc: (data: T) => K,
+    ascending: boolean,
   ) {
     super(context);
     this._numPartition = numPartition;
     this._dependence = dependence;
     this._numPartition = numPartition;
     this._keyFunc = keyFunc;
+    this._ascending = ascending;
   }
 
   getNumPartitions() {
     return this._numPartition;
   }
 
-  async getFunc(): Promise<(partitionId: number) => (workerId: string) => T[]> {
+  async getFunc(): Promise<PartitionFunc<T[]>> {
     let cachedDependence: CachedRDD<T>;
     const storageType = this._context.option.defaultRepartitionStorage;
 
@@ -842,10 +892,12 @@ export class SortedRDD<T, K extends ComparableType> extends RDD<T> {
               }
               return ret;
             },
-            { f, partitionId, keyFunc },
+            { f, partitionId, keyFunc, originPartitions },
           );
         },
         {
+          sf: sf.requireModule('@dcfjs/common/serializeFunction'),
+          originPartitions,
           originFunc,
           keyFunc,
         },
@@ -860,10 +912,12 @@ export class SortedRDD<T, K extends ComparableType> extends RDD<T> {
       ),
     );
 
+    const ascending = this._ascending ? 1 : -1;
+
     // Step 3: sort samples, and get seperate points.
     samples.sort((a, b) => {
       if (a[0] !== b[0]) {
-        return a[0] < b[0] ? -1 : 1;
+        return (a[0] < b[0] ? -1 : 1) * (ascending ? 1 : -1);
       }
       if (a[1] !== b[1]) {
         return a[1] < b[1] ? -1 : 1;
@@ -882,11 +936,107 @@ export class SortedRDD<T, K extends ComparableType> extends RDD<T> {
       }
     }
 
-    throw Error('Working');
     // Step 4: Repartition by points.
 
-    if (this._dependence === cachedDependence) {
-      cachedDependence.unpersist();
+    if (this._dependence !== cachedDependence) {
+      // remove persisted data after sorted.
+      this._context.postClientWork(() => cachedDependence.unpersist());
     }
+
+    const repartitionedFunc = await getRepartitionFunc(
+      this._context,
+      cachedDependence,
+      numPartitions,
+      sf.captureEnv(
+        (partitionId: number) => {
+          return sf.captureEnv(
+            (v: T[]) => {
+              const ret: [T, K, number, number][][] = [];
+              for (let i = 0; i < numPartitions; i++) {
+                ret.push([]);
+              }
+              const tmp = v.map((item, i) => [keyFunc(item), i] as [K, number]);
+              tmp.sort((a, b) => {
+                if (a[0] !== b[0]) {
+                  return a[0] < b[0] ? -1 : 1;
+                }
+                return a[1] < b[1] ? -1 : 1;
+              });
+              let index = 0;
+              for (const [key, i] of tmp) {
+                // compare with points
+                for (; index < points.length; ) {
+                  if (key < points[index][0]) {
+                    break;
+                  }
+                  if (key > points[index][0]) {
+                    index++;
+                    continue;
+                  }
+                  if (partitionId < points[index][1]) {
+                    break;
+                  }
+                  if (partitionId > points[index][1]) {
+                    index++;
+                    continue;
+                  }
+                  if (i < points[index][2]) {
+                    break;
+                  }
+                  index++;
+                }
+                ret[index].push([v[i], key, partitionId, i]);
+              }
+              return ret;
+            },
+            {
+              keyFunc,
+              numPartitions,
+              partitionId,
+              points,
+            },
+          );
+        },
+        {
+          sf: sf.requireModule('@dcfjs/common/serializeFunction'),
+          keyFunc,
+          numPartitions,
+          points,
+        },
+      ),
+    );
+
+    // Step 5: Sort in partition.
+    // Maybe reverse (if ascending == false).
+    return sf.captureEnv(
+      (partitionId: number) => {
+        const f = repartitionedFunc(partitionId);
+        return sf.captureEnv(
+          async (workerId: string) => {
+            const tmp = await f(workerId);
+            tmp.sort((a, b) => {
+              if (a[1] !== b[1]) {
+                return (a[1] < b[1] ? -1 : 1) * (ascending ? 1 : -1);
+              }
+              if (a[2] !== b[2]) {
+                return a[2] < b[2] ? -1 : 1;
+              }
+              return a[3] < b[3] ? -1 : 1;
+            });
+            return tmp.map(item => item[0]);
+          },
+          {
+            f,
+            ascending,
+          },
+        );
+      },
+      {
+        sf: sf.requireModule('@dcfjs/common/serializeFunction'),
+        numPartitions,
+        repartitionedFunc,
+        ascending,
+      },
+    );
   }
 }
