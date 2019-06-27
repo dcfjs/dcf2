@@ -28,7 +28,6 @@ const defaultOption: ContextOption = {
 export class Context {
   private _client: Client;
   private _option: ContextOption;
-  private _postClientWorks: (() => void | Promise<void>)[] = [];
 
   constructor(client: Client, option?: Partial<ContextOption>) {
     this._client = client;
@@ -86,10 +85,6 @@ export class Context {
     return this._option;
   }
 
-  postClientWork(f: () => void | Promise<void>) {
-    this._postClientWorks.push(f);
-  }
-
   close(): Promise<void> {
     return this._client.close();
   }
@@ -108,7 +103,6 @@ export class Context {
     ) => T1 | Promise<T1>,
   ): Promise<T1> {
     const { showProgress } = this._option;
-    const postClientWorks = this._postClientWorks.splice(0);
 
     const ret = await this._client.post<T1>(
       '/exec',
@@ -164,9 +158,6 @@ export class Context {
         ),
       ),
     );
-    for (const work of postClientWorks) {
-      await work();
-    }
     return ret;
   }
 
