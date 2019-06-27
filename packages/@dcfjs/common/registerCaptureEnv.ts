@@ -14,26 +14,13 @@ const DEFAULT_EXTENSIONS = Object.freeze([
   '.mjs',
 ]);
 
-const KNOWN_GLOBAL: { [key: string]: boolean } = {
-  Promise: true,
-  Array: true,
-  Buffer: true,
-  require: true,
-  process: true,
-  global: true,
-  console: true,
-  Math: true,
-  Error: true,
-  __captureEnv: true,
-  __requireModule: true,
-};
-
 function hookCode(ast: any) {
   const stack: any[] = [
     {
       knownIdentifiers: {},
       isFunction: false,
       upValues: {},
+      usedUpValues: {},
     },
   ];
   let top: any = stack[0];
@@ -45,7 +32,7 @@ function hookCode(ast: any) {
   ) {
     if (isVar) {
       // var can be used in whole function before defined.
-      delete top.upValues[dec.name];
+      delete top.usedUpValues[dec.name];
     }
     top.knownIdentifiers[dec.name] = moduleName;
   }
@@ -54,7 +41,7 @@ function hookCode(ast: any) {
     if (n.Identifier.check(dec)) {
       if (isVar) {
         // var can be used in whole function before defined.
-        delete top.upValues[dec.name];
+        delete top.usedUpValues[dec.name];
       }
       top.knownIdentifiers[dec.name] = top.knownIdentifiers[dec.name] || true;
     }
@@ -92,7 +79,7 @@ function hookCode(ast: any) {
         break;
       }
       if (curr.isFunction) {
-        curr.upValues[name] = moduleName;
+        curr.usedUpValues[name] = moduleName;
         if (typeof moduleName === 'string') {
           return;
         }
@@ -111,7 +98,8 @@ function hookCode(ast: any) {
       (top = {
         knownIdentifiers,
         isFunction,
-        upValues: isFunction ? {} : top.isFunction,
+        usedUpValues: isFunction ? {} : top.isFunction,
+        upValues: Object.assign({}, top.upValues, top.knownIdentifiers),
       }),
     );
   }
@@ -163,7 +151,7 @@ function hookCode(ast: any) {
           return;
         }
       }
-      if (!KNOWN_GLOBAL[self.name]) {
+      if (top.upValues[self.name]) {
         registerUpValue(self.name);
       }
     },
@@ -211,14 +199,14 @@ function hookCode(ast: any) {
         }
       }
       this.traverse(path);
-      const { upValues } = popStack();
+      const { usedUpValues } = popStack();
       path.insertAfter(
         b.expressionStatement(
           b.callExpression(b.identifier('__captureEnv'), [
             path.value.id,
             b.objectExpression(
-              Object.keys(upValues).map(v =>
-                generateEnvProperty(v, upValues[v]),
+              Object.keys(usedUpValues).map(v =>
+                generateEnvProperty(v, usedUpValues[v]),
               ),
             ),
           ]),
@@ -235,15 +223,15 @@ function hookCode(ast: any) {
         }
       }
       this.traverse(path);
-      const { upValues } = popStack();
+      const { usedUpValues } = popStack();
 
-      if (Object.keys(upValues).length > 0) {
+      if (Object.keys(usedUpValues).length > 0) {
         path.replace(
           b.callExpression(b.identifier('__captureEnv'), [
             path.value,
             b.objectExpression(
-              Object.keys(upValues).map(v =>
-                generateEnvProperty(v, upValues[v]),
+              Object.keys(usedUpValues).map(v =>
+                generateEnvProperty(v, usedUpValues[v]),
               ),
             ),
           ]),
@@ -256,15 +244,15 @@ function hookCode(ast: any) {
         getIdentifierFromDefinition(item);
       }
       this.traverse(path);
-      const { upValues } = popStack();
+      const { usedUpValues } = popStack();
 
-      if (Object.keys(upValues).length > 0) {
+      if (Object.keys(usedUpValues).length > 0) {
         path.replace(
           b.callExpression(b.identifier('__captureEnv'), [
             path.value,
             b.objectExpression(
-              Object.keys(upValues).map(v =>
-                generateEnvProperty(v, upValues[v]),
+              Object.keys(usedUpValues).map(v =>
+                generateEnvProperty(v, usedUpValues[v]),
               ),
             ),
           ]),
