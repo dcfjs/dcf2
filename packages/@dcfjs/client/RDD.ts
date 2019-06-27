@@ -6,6 +6,8 @@ import { Context } from './Context';
 import ah = require('@dcfjs/common/arrayHelpers');
 import sf = require('@dcfjs/common/serializeFunction');
 import sr = require('@dcfjs/common/storageRegistry');
+const XXHash = require('xxhash');
+const pack = require('@dcfjs/objpack');
 const v8 = require('v8');
 
 export type ParallelTask = (dispachWorker: WorkDispatcher) => any;
@@ -24,6 +26,54 @@ function envDeprecated() {
     console.warn(envDeprecatedMsg);
     DeprecationWarningPrinted = true;
   }
+}
+
+function hashPartitionFunc<V>(numPartitions: number) {
+  const seed = ((Math.random() * 0xffffffff) | 0) >>> 0;
+  return sf.captureEnv(
+    (data: V) => {
+      return XXHash.hash(pack.encode(data), seed) % numPartitions;
+    },
+    {
+      numPartitions,
+      seed,
+      XXHash: sf.requireModule('xxhash'),
+      pack: sf.requireModule('@dcfjs/objpack'),
+    },
+  );
+}
+
+function realGroupWith<K>(
+  rdds: RDD<[K, any]>[],
+  context: Context,
+  numPartitions?: number,
+): RDD<[K, any[][]]> {
+  const rddCount = rdds.length;
+
+  return context
+    .union(
+      ...rdds.map((v, i) =>
+        v.map(
+          sf.captureEnv(
+            ([k, v]) => {
+              const ret: any[][] = [];
+              for (let j = 0; j < rddCount; j++) {
+                ret.push(j === i ? [v] : []);
+              }
+              return [k, ret] as [K, any[][]];
+            },
+            { rddCount, i },
+          ),
+        ),
+      ),
+    )
+    .reduceByKey((a: any[][], b: any[][]) => {
+      const ret = [];
+      for (let i = 0; i < a.length; i++) {
+        ret.push(a[i].concat(b[i]));
+      }
+      return ret;
+    }, numPartitions);
 }
 
 export abstract class RDD<T> {
@@ -185,7 +235,7 @@ export abstract class RDD<T> {
 
   async reduce(
     reduceFunc: (a: T, b: T) => T,
-    env?: any,
+    env?: FunctionEnv,
   ): Promise<T | undefined> {
     const numPartitions = this.getNumPartitions();
     const partitionFunc = await this.getFunc();
@@ -358,6 +408,253 @@ export abstract class RDD<T> {
         },
       ),
     );
+  }
+
+  repartition(numPartitions: number): RDD<T> {
+    return this.partitionBy(
+      numPartitions,
+      sf.captureEnv(() => (Math.random() * numPartitions) | 0, {
+        numPartitions,
+      }),
+    );
+  }
+
+  distinct(
+    numPartitions: number = this._context.option.defaultPartitions,
+  ): RDD<T> {
+    return this.partitionBy(
+      numPartitions,
+      hashPartitionFunc<T>(numPartitions),
+    ).mapPartitions(
+      sf.captureEnv(
+        datas => {
+          const ret = [];
+          const map: { [key: string]: T } = {};
+          for (const item of datas) {
+            const k = pack.encode(item).toString('base64');
+            if (!map[k]) {
+              map[k] = item;
+              ret.push(item);
+            }
+          }
+          return ret;
+        },
+        {
+          pack: sf.requireModule('@dcfjs/objpack'),
+        },
+      ),
+    );
+  }
+
+  combineByKey<K, V, C>(
+    this: RDD<[K, V]>,
+    createCombiner: (a: V) => C,
+    mergeValue: (a: C, b: V) => C,
+    mergeCombiners: (a: C, b: C) => C,
+    numPartitions: number = this._context.option.defaultPartitions,
+    partitionFunc: (v: K) => number = hashPartitionFunc<K>(numPartitions),
+    env?: FunctionEnv,
+  ): RDD<[K, C]> {
+    if (env) {
+      sf.captureEnv(createCombiner, env);
+      sf.captureEnv(mergeValue, env);
+      sf.captureEnv(mergeCombiners, env);
+      sf.captureEnv(partitionFunc, env);
+      envDeprecated();
+    }
+
+    const mapFunction1 = sf.captureEnv(
+      (datas: [K, V][]) => {
+        const ret = [];
+        const map: { [key: string]: [K, C] } = {};
+        for (const item of datas) {
+          const k = pack.encode(item[0]).toString('base64');
+          let r = map[k];
+          if (!r) {
+            r = [item[0], createCombiner(item[1])];
+            map[k] = r;
+            ret.push(r);
+          } else {
+            r[1] = mergeValue(r[1], item[1]);
+          }
+        }
+        return ret;
+      },
+      {
+        createCombiner,
+        mergeValue,
+        pack: sf.requireModule('@dcfjs/objpack'),
+      },
+    );
+
+    const mapFunction2 = sf.captureEnv(
+      (datas: [K, C][]) => {
+        const ret = [];
+        const map: { [key: string]: [K, C] } = {};
+        for (const item of datas) {
+          const k = pack.encode(item[0]).toString('base64');
+          let r = map[k];
+          if (!r) {
+            r = [item[0], item[1]];
+            map[k] = r;
+            ret.push(r);
+          } else {
+            r[1] = mergeCombiners(r[1], item[1]);
+          }
+        }
+        return ret;
+      },
+      {
+        mergeCombiners,
+        pack: sf.requireModule('@dcfjs/objpack'),
+      },
+    );
+
+    const realPartitionFunc = sf.captureEnv(
+      (data: [K, C]) => {
+        return partitionFunc(data[0]);
+      },
+      {
+        partitionFunc,
+      },
+    );
+
+    return this.mapPartitions<[K, C]>(mapFunction1)
+      .partitionBy(numPartitions, realPartitionFunc)
+      .mapPartitions<[K, C]>(mapFunction2);
+  }
+
+  reduceByKey<K, V>(
+    this: RDD<[K, V]>,
+    func: (a: V, B: V) => V,
+    numPartitions: number = this._context.option.defaultPartitions,
+    partitionFunc?: (v: K) => number,
+    env?: FunctionEnv,
+  ): RDD<[K, V]> {
+    return this.combineByKey(
+      x => x,
+      func,
+      func,
+      numPartitions,
+      partitionFunc,
+      env,
+    );
+  }
+
+  groupWith<K, V, V1>(
+    this: RDD<[K, V]>,
+    other1: RDD<[K, V1]>,
+  ): RDD<[K, [V[], V1[]]]>;
+  groupWith<K, V, V1, V2>(
+    this: RDD<[K, V]>,
+    other1: RDD<[K, V1]>,
+    other2: RDD<[K, V2]>,
+  ): RDD<[K, [V[], V1[], V2[]]]>;
+  groupWith<K, V, V1, V2, V3>(
+    this: RDD<[K, V]>,
+    other1: RDD<[K, V1]>,
+    other2: RDD<[K, V2]>,
+    other3: RDD<[K, V3]>,
+  ): RDD<[K, [V[], V1[], V2[], V3[]]]>;
+  groupWith<K>(this: RDD<[K, any]>, ...others: RDD<[K, any]>[]): RDD<[K, any]>;
+  groupWith<K>(this: RDD<[K, any]>, ...others: RDD<[K, any]>[]): RDD<[K, any]> {
+    return realGroupWith([this, ...others], this._context);
+  }
+
+  cogroup<K, V, V1>(
+    this: RDD<[K, V]>,
+    other: RDD<[K, V1]>,
+    numPartitions?: number,
+  ): RDD<[K, [V[], V1[]]]> {
+    return realGroupWith([this, other], this._context, numPartitions) as RDD<
+      [K, [V[], V1[]]]
+    >;
+  }
+
+  join<K, V, V1>(
+    this: RDD<[K, V]>,
+    other: RDD<[K, V1]>,
+    numPartitions?: number,
+  ): RDD<[K, [V, V1]]> {
+    return this.cogroup(other, numPartitions).flatMap(([k, [v1s, v2s]]) => {
+      const ret = [];
+      for (const v1 of v1s) {
+        for (const v2 of v2s) {
+          ret.push([k, [v1, v2]] as [K, [V, V1]]);
+        }
+      }
+      return ret;
+    });
+  }
+
+  leftOuterJoin<K, V, V1>(
+    this: RDD<[K, V]>,
+    other: RDD<[K, V1]>,
+    numPartitions?: number,
+  ): RDD<[K, [V, V1 | null]]> {
+    return this.cogroup(other, numPartitions).flatMap(([k, [v1s, v2s]]) => {
+      const ret = [];
+      if (v2s.length === 0) {
+        for (const v1 of v1s) {
+          ret.push([k, [v1, null]] as [K, [V, V1 | null]]);
+        }
+      } else {
+        for (const v1 of v1s) {
+          for (const v2 of v2s) {
+            ret.push([k, [v1, v2]] as [K, [V, V1 | null]]);
+          }
+        }
+      }
+      return ret;
+    });
+  }
+
+  rightOuterJoin<K, V, V1>(
+    this: RDD<[K, V]>,
+    other: RDD<[K, V1]>,
+    numPartitions?: number,
+  ): RDD<[K, [V | null, V1]]> {
+    return this.cogroup(other, numPartitions).flatMap(([k, [v1s, v2s]]) => {
+      const ret = [];
+      if (v1s.length === 0) {
+        for (const v2 of v2s) {
+          ret.push([k, [null, v2]] as [K, [V | null, V1]]);
+        }
+      } else {
+        for (const v1 of v1s) {
+          for (const v2 of v2s) {
+            ret.push([k, [v1, v2]] as [K, [V | null, V1]]);
+          }
+        }
+      }
+      return ret;
+    });
+  }
+
+  fullOuterJoin<K, V, V1>(
+    this: RDD<[K, V]>,
+    other: RDD<[K, V1]>,
+    numPartitions?: number,
+  ): RDD<[K, [V | null, V1 | null]]> {
+    return this.cogroup(other, numPartitions).flatMap(([k, [v1s, v2s]]) => {
+      const ret = [];
+      if (v1s.length === 0) {
+        for (const v2 of v2s) {
+          ret.push([k, [null, v2]] as [K, [V | null, V1 | null]]);
+        }
+      } else if (v2s.length === 0) {
+        for (const v1 of v1s) {
+          ret.push([k, [v1, null]] as [K, [V | null, V1 | null]]);
+        }
+      } else {
+        for (const v1 of v1s) {
+          for (const v2 of v2s) {
+            ret.push([k, [v1, v2]] as [K, [V | null, V1 | null]]);
+          }
+        }
+      }
+      return ret;
+    });
   }
 
   sort<K extends ComparableType>(
