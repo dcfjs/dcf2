@@ -18,7 +18,7 @@ export type PartitionFunc<T> = (
 export type FinalizedFunc = (ts: sr.TempStorageSession) => void | Promise<void>;
 export type MapperFunc<T, T1> = (input: T[]) => T1[];
 export type ComparableType = string | number;
-export type RDDFunc<T> = [PartitionFunc<T>, FinalizedFunc | undefined];
+export type RDDFuncs<T> = [number, PartitionFunc<T>, FinalizedFunc | undefined];
 
 let DeprecationWarningPrinted = false;
 const envDeprecatedMsg =
@@ -103,16 +103,23 @@ export abstract class RDD<T> {
   protected constructor(context: Context) {
     this._context = context;
   }
-  abstract getFunc(): RDDFunc<T[]> | Promise<RDDFunc<T[]>>;
-  abstract getNumPartitions(): number;
+  abstract getFunc(): RDDFuncs<T[]> | Promise<RDDFuncs<T[]>>;
+
+  // Dependence rdd should override this method to get better performance.
+  getNumPartitions(): number | Promise<number> {
+    const tmp = this.getFunc();
+    if (tmp instanceof Promise) {
+      return tmp.then(v => v[0]);
+    }
+    return tmp[0];
+  }
 
   union(...others: RDD<T>[]): RDD<T> {
     return this._context.union(this, ...others);
   }
 
   async collect(): Promise<T[]> {
-    const numPartitions = this.getNumPartitions();
-    const [partitionFunc, finalizedFunc] = await this.getFunc();
+    const [numPartitions, partitionFunc, finalizedFunc] = await this.getFunc();
 
     return this._context.execute(
       numPartitions,
@@ -122,8 +129,7 @@ export abstract class RDD<T> {
   }
 
   async count(): Promise<number> {
-    const numPartitions = this.getNumPartitions();
-    const [partitionFunc, finalizedFunc] = await this.getFunc();
+    const [numPartitions, partitionFunc, finalizedFunc] = await this.getFunc();
 
     return this._context.execute(
       numPartitions,
@@ -147,8 +153,7 @@ export abstract class RDD<T> {
   }
 
   async take(count: number): Promise<T[]> {
-    const numPartitions = this.getNumPartitions();
-    const [partitionFunc, finalizedFunc] = await this.getFunc();
+    const [numPartitions, partitionFunc, finalizedFunc] = await this.getFunc();
 
     return this._context.execute(
       numPartitions,
@@ -266,8 +271,7 @@ export abstract class RDD<T> {
     reduceFunc: (a: T, b: T) => T,
     env?: FunctionEnv,
   ): Promise<T | undefined> {
-    const numPartitions = this.getNumPartitions();
-    const [partitionFunc, finalizedFunc] = await this.getFunc();
+    const [numPartitions, partitionFunc, finalizedFunc] = await this.getFunc();
 
     if (env) {
       sf.captureEnv(reduceFunc, env);
@@ -372,74 +376,7 @@ export abstract class RDD<T> {
   }
 
   coalesce(numPartitions: number): RDD<T> {
-    const originPartitions = this.getNumPartitions();
-
-    /**
-     * Args for each pieces: [startIndex, [...rates to split current partition expect last]]
-     * For example:
-     * 3 -> 4
-     * [ [0, [0.75, ]],
-     *   [1, [0.5, ]],
-     *   [2, [0.25, ]] ]
-     *
-     * after coalesce, each partition got 0.75 partition origin size:
-     *  part1': 0.75 from part1
-     *  part2': 0.25 from part1(rest) + 0.5 from part2
-     *  part3': 0.5 from part2(rest) + 0.25 from part3
-     *  part4': 0.75 from part4(rest)
-     */
-    const partitionArgs: [number, number[]][] = [];
-    let last: number[] = [];
-    partitionArgs.push([0, last]);
-    const rate = originPartitions / numPartitions;
-
-    let counter = 0;
-    for (let i = 0; i < numPartitions - 1; i++) {
-      counter += rate;
-      while (counter >= 1) {
-        counter -= 1;
-        last = [];
-        partitionArgs.push([i, last]);
-      }
-      last.push(counter);
-    }
-    // manually add last partition to avoid precsion loss.
-    while (partitionArgs.length < originPartitions) {
-      partitionArgs.push([numPartitions - 1, []]);
-    }
-
-    return new RepartitionRDD(
-      this._context,
-      this,
-      numPartitions,
-      sf.captureEnv(
-        partitionId => {
-          const arg = partitionArgs[partitionId];
-          return sf.captureEnv(
-            (data: T[]) => {
-              const ret: any[][] = [];
-              let lastIndex = 0;
-              for (let i = 0; i < arg[0]; i++) {
-                ret.push([]);
-              }
-              for (const rate of arg[1]) {
-                const nextIndex = Math.floor(data.length * rate);
-                ret.push(data.slice(lastIndex, nextIndex));
-                lastIndex = nextIndex;
-              }
-              ret.push(data.slice(lastIndex));
-              return ret;
-            },
-            { numPartitions, arg },
-          );
-        },
-        {
-          numPartitions,
-          partitionArgs,
-          sf: sf.requireModule('@dcfjs/common/serializeFunction'),
-        },
-      ),
-    );
+    return new CoalesceRDD<T>(this._context, this, numPartitions);
   }
 
   repartition(numPartitions: number): RDD<T> {
@@ -733,33 +670,36 @@ export class GeneratedRDD<T> extends RDD<T> {
     this._function = func;
   }
 
-  getFunc(): RDDFunc<T[]> {
-    return [this._function!, undefined];
+  getFunc(): RDDFuncs<T[]> {
+    return [this._numPartition, this._function!, undefined];
   }
 
-  getNumPartitions(): number {
+  getNumPartitions() {
     return this._numPartition;
   }
 }
 
 export class MappedRDD<T1, T> extends RDD<T1> {
-  private _numPartition: number;
   private _mapper: MapperFunc<T, T1>;
   private _dependence: RDD<T>;
 
   constructor(context: Context, dependence: RDD<T>, mapper: MapperFunc<T, T1>) {
     super(context);
 
-    this._numPartition = dependence.getNumPartitions();
     this._mapper = mapper;
     this._dependence = dependence;
   }
 
-  async getFunc(): Promise<RDDFunc<T1[]>> {
+  async getFunc(): Promise<RDDFuncs<T1[]>> {
     const mapper = this._mapper;
-    const [depFunc, depFinalizer] = await this._dependence.getFunc();
+    const [
+      numPartitions,
+      depFunc,
+      depFinalizer,
+    ] = await this._dependence.getFunc();
 
     return [
+      numPartitions,
       sf.captureEnv(
         partitionId => {
           const f = depFunc(partitionId);
@@ -783,40 +723,38 @@ export class MappedRDD<T1, T> extends RDD<T1> {
     ];
   }
 
-  getNumPartitions(): number {
-    return this._numPartition;
+  getNumPartitions() {
+    return this._dependence.getNumPartitions();
   }
 }
 
 export class UnionRDD<T> extends RDD<T> {
-  private _numPartition: number;
   private _dependences: RDD<T>[];
 
   constructor(context: Context, dependences: RDD<T>[]) {
     super(context);
-    this._numPartition = dependences
-      .map(v => v.getNumPartitions())
-      .reduce((a, b) => a + b);
     this._dependences = dependences;
   }
 
-  getNumPartitions(): number {
-    return this._numPartition;
-  }
-
-  async getFunc(): Promise<RDDFunc<T[]>> {
-    const partitionCounts = this._dependences.map(v => v.getNumPartitions());
+  async getFunc(): Promise<RDDFuncs<T[]>> {
+    const partitionCounts: number[] = [];
     const rddFuncs: PartitionFunc<T[]>[] = [];
     const rddFinalizers: FinalizedFunc[] = [];
     for (let i = 0; i < this._dependences.length; i++) {
-      const [func, finalizer] = await this._dependences[i].getFunc();
+      const [numPartitions, func, finalizer] = await this._dependences[
+        i
+      ].getFunc();
+      partitionCounts.push(numPartitions);
       rddFuncs.push(func);
       if (finalizer) {
         rddFinalizers.push(finalizer);
       }
     }
 
+    const numPartitions = partitionCounts.reduce((a, b) => a + b);
+
     return [
+      numPartitions,
       sf.captureEnv(
         partitionId => {
           for (let i = 0; i < partitionCounts.length; i++) {
@@ -846,24 +784,28 @@ export class UnionRDD<T> extends RDD<T> {
           ),
     ];
   }
+
+  getNumPartitions() {
+    const partitionCounts = this._dependences.map(v => v.getNumPartitions());
+
+    if (partitionCounts.some(v => v instanceof Promise)) {
+      return Promise.all(partitionCounts).then(v => v.reduce((a, b) => a + b));
+    }
+    return (partitionCounts as number[]).reduce((a, b) => a + b);
+  }
 }
 
 export class CachedRDD<T> extends RDD<T> {
-  private _numPartition: number;
   private _dependence: RDD<T>;
+  private _cachedNumPartition?: number;
   private _cachedPartitions?: string[];
   private _storageType: string;
   private _autoUnpersist: boolean = false;
 
   constructor(context: Context, dependence: RDD<T>, storageType: string) {
     super(context);
-    this._numPartition = dependence.getNumPartitions();
     this._dependence = dependence;
     this._storageType = storageType;
-  }
-
-  getNumPartitions(): number {
-    return this._numPartition;
   }
 
   // mark this cache auto unpersist after used again.
@@ -897,7 +839,7 @@ export class CachedRDD<T> extends RDD<T> {
     }
   }
 
-  async getFunc(): Promise<RDDFunc<T[]>> {
+  async getFunc(): Promise<RDDFuncs<T[]>> {
     const storageType = this._storageType;
 
     if (!this._cachedPartitions) {
@@ -905,10 +847,15 @@ export class CachedRDD<T> extends RDD<T> {
         // auto unpersist + not cached, use dependence directly.
         return await this._dependence.getFunc();
       }
-      const [depFunc, depFinalizer] = await this._dependence.getFunc();
+      const [
+        numPartitions,
+        depFunc,
+        depFinalizer,
+      ] = await this._dependence.getFunc();
+      this._cachedNumPartition = numPartitions;
       // calc cached partitions.
       this._cachedPartitions = await this._context.execute(
-        this._numPartition,
+        numPartitions,
         sf.captureEnv(
           (partitionId, tempStorageSession) => {
             const f = depFunc(partitionId);
@@ -948,6 +895,7 @@ export class CachedRDD<T> extends RDD<T> {
 
     const partitions = this._cachedPartitions!;
     return [
+      this._cachedNumPartition!,
       sf.captureEnv(
         partitionId => {
           const partition = partitions[partitionId];
@@ -991,18 +939,24 @@ export class CachedRDD<T> extends RDD<T> {
         : undefined,
     ];
   }
+
+  getNumPartitions() {
+    if (this._cachedPartitions) {
+      return this._cachedNumPartition!;
+    }
+    return this._dependence.getNumPartitions();
+  }
 }
 
 async function getRepartitionFunc<T, T1 = T>(
   context: Context,
-  dependence: RDD<T>,
+  dependence: RDDFuncs<T[]>,
   numPartitions: number,
   partitionFunc: (paritionId: number) => (v: T[]) => T1[][],
-): Promise<RDDFunc<T1[]>> {
+): Promise<RDDFuncs<T1[]>> {
   const storageType = context.option.defaultRepartitionStorage;
 
-  const depPartitions = dependence.getNumPartitions();
-  const [depFunc, depFinalizer] = await dependence.getFunc();
+  const [depPartitions, depFunc, depFinalizer] = dependence;
 
   const repartitionId = await context.client.post<string>(
     '/exec',
@@ -1103,6 +1057,7 @@ async function getRepartitionFunc<T, T1 = T>(
   );
 
   return [
+    numPartitions,
     sf.captureEnv(
       partitionId => {
         const partPieces = pieces[partitionId];
@@ -1189,17 +1144,17 @@ export class RepartitionRDD<T> extends RDD<T> {
     this._partitionFunc = partitionFunc;
   }
 
-  getNumPartitions(): number {
-    return this._numPartition;
-  }
-
-  async getFunc(): Promise<RDDFunc<T[]>> {
+  async getFunc(): Promise<RDDFuncs<T[]>> {
     return getRepartitionFunc(
       this._context,
-      this._dependence,
+      await this._dependence.getFunc(),
       this._numPartition,
       this._partitionFunc,
     );
+  }
+
+  getNumPartitions() {
+    return this._numPartition;
   }
 }
 
@@ -1224,11 +1179,7 @@ export class SortedRDD<T, K extends ComparableType> extends RDD<T> {
     this._ascending = ascending;
   }
 
-  getNumPartitions() {
-    return this._numPartition;
-  }
-
-  async getFunc(): Promise<RDDFunc<T[]>> {
+  async getFunc(): Promise<RDDFuncs<T[]>> {
     let cachedDependence: CachedRDD<T>;
     const storageType = this._context.option.defaultRepartitionStorage;
 
@@ -1244,8 +1195,11 @@ export class SortedRDD<T, K extends ComparableType> extends RDD<T> {
     // so we get a sample count near to a single partition.
     // Sample contains partitionIndex & localIndex to avoid performance inssue
     // when dealing with too many same values.
-    const originPartitions = cachedDependence.getNumPartitions();
-    const [originFunc, originFinalizer] = await cachedDependence.getFunc();
+    const [
+      originPartitions,
+      originFunc,
+      originFinalizer,
+    ] = await cachedDependence.getFunc();
 
     const keyFunc = this._keyFunc;
 
@@ -1324,9 +1278,9 @@ export class SortedRDD<T, K extends ComparableType> extends RDD<T> {
       cachedDependence.autoUnpersist();
     }
 
-    const [repartitionedFunc, finalizer] = await getRepartitionFunc(
+    const [_, repartitionedFunc, finalizer] = await getRepartitionFunc(
       this._context,
-      cachedDependence,
+      [originPartitions, originFunc, originFinalizer],
       numPartitions,
       sf.captureEnv(
         (partitionId: number) => {
@@ -1396,6 +1350,7 @@ export class SortedRDD<T, K extends ComparableType> extends RDD<T> {
     // Step 5: Sort in partition.
     // Maybe reverse (if ascending == false).
     return [
+      numPartitions,
       sf.captureEnv(
         (partitionId: number) => {
           const f = repartitionedFunc(partitionId);
@@ -1428,5 +1383,86 @@ export class SortedRDD<T, K extends ComparableType> extends RDD<T> {
       ),
       finalizer,
     ];
+  }
+
+  getNumPartitions() {
+    return this._numPartition;
+  }
+}
+
+export class CoalesceRDD<T> extends RDD<T> {
+  private _numPartition: number;
+  private _dependence: RDD<T>;
+  constructor(context: Context, dependence: RDD<T>, numPartition: number) {
+    super(context);
+    this._numPartition = numPartition;
+    this._dependence = dependence;
+  }
+
+  async getFunc(): Promise<RDDFuncs<T[]>> {
+    const [
+      originPartitions,
+      originFunc,
+      originFinalizer,
+    ] = await this._dependence.getFunc();
+
+    const numPartitions = this._numPartition;
+
+    const partitionArgs: [number, number[]][] = [];
+    let last: number[] = [];
+    partitionArgs.push([0, last]);
+    const rate = originPartitions / numPartitions;
+
+    let counter = 0;
+    for (let i = 0; i < numPartitions - 1; i++) {
+      counter += rate;
+      while (counter >= 1) {
+        counter -= 1;
+        last = [];
+        partitionArgs.push([i, last]);
+      }
+      last.push(counter);
+    }
+    // manually add last partition to avoid precsion loss.
+    while (partitionArgs.length < originPartitions) {
+      partitionArgs.push([numPartitions - 1, []]);
+    }
+
+    return getRepartitionFunc(
+      this._context,
+      [originPartitions, originFunc, originFinalizer],
+      numPartitions,
+      sf.captureEnv(
+        partitionId => {
+          const arg = partitionArgs[partitionId];
+          return sf.captureEnv(
+            (data: T[]) => {
+              const ret: any[][] = [];
+              let lastIndex = 0;
+              for (let i = 0; i < arg[0]; i++) {
+                ret.push([]);
+              }
+              for (const rate of arg[1]) {
+                const nextIndex = Math.floor(data.length * rate);
+                ret.push(data.slice(lastIndex, nextIndex));
+                lastIndex = nextIndex;
+              }
+              ret.push(data.slice(lastIndex));
+              return ret;
+            },
+            { numPartitions, arg },
+          );
+        },
+        {
+          numPartitions,
+          partitionArgs,
+          sf: sf.requireModule('@dcfjs/common/serializeFunction'),
+        },
+      ),
+    );
+  }
+
+  getNumPartitions() {
+    return this._numPartition;
   }
 }
