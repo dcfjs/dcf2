@@ -77,8 +77,12 @@ export class SharedFsTempMasterStorage extends SharedFsTempStorage
 
     for (const fn of fs.readdirSync(this._basePath)) {
       const path = this.resolve(fn);
-      if (fs.statSync(path).mtimeMs < expired) {
-        fs.unlinkSync(path);
+      try {
+        if (fs.statSync(path).mtimeMs < expired) {
+          fs.unlinkSync(path);
+        }
+      } catch (e) {
+        // ignore, file may be removed at other process.
       }
     }
   }
