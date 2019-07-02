@@ -382,21 +382,21 @@ describe('MapReduce With local worker and sharedfs temp storage', () => {
   });
 
   it('Test chained repartition', async () => {
-    const max = 100000;
+    const max = 10000;
     const tmp1 = dcc
       .range(0, max)
-      .repartition(16)
-      .repartition(8);
+      .repartition(8)
+      .repartition(4);
     const tmp2 = dcc
       .range(0, max / 4)
-      .repartition(16)
       .repartition(8)
+      .repartition(4)
       .union(tmp1)
-      .repartition(128);
+      .repartition(32);
 
     expect(await tmp2.count()).equals(max * 1.25);
     expect(await tmp2.max()).equals(max - 1);
     expect(await tmp2.min()).equals(0);
-    expect(await tmp2.reduce((a, b) => a + b)).equals(4999950000 + 312487500);
+    expect(await tmp2.reduce((a, b) => a + b)).equals(49995000 + 3123750);
   }).timeout(10000);
 });
