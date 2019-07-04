@@ -9,7 +9,7 @@ import { RDD } from '@dcfjs/client';
 
 chai.use(chaiAsPromised);
 
-describe('MapReduce With local worker', () => {
+describe('Recovery from script error.', () => {
   let dcc: Context;
 
   before(async () => {

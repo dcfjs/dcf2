@@ -3,17 +3,17 @@ import streamToBuffer from './streamToBuffer';
 import { EventEmitter } from 'events';
 const { deserialize, serialize } = require('v8');
 
-export interface ClientConfig {}
+export interface ClientConfig { }
 
-export class RequestError extends Error {}
+export class RequestError extends Error { }
 
 export class RequestNotFoundError extends Error {
   constructor() {
     super('Not found.');
   }
 }
-export class RequestBadRequestError extends Error {}
-export class RequestInternalServerError extends Error {}
+export class RequestBadRequestError extends Error { }
+export class RequestInternalServerError extends Error { }
 export class RequestInvalidResponseError extends Error {
   constructor() {
     super('Invalid Response.');
@@ -55,11 +55,11 @@ export class Client {
       }
       const headers: http2.IncomingHttpHeaders &
         http2.IncomingHttpStatusHeader = await new Promise(
-        (resolve, reject) => {
-          req.on('error', reject);
-          req.on('response', headers => resolve(headers));
-        },
-      );
+          (resolve, reject) => {
+            req.on('error', reject);
+            req.on('response', headers => resolve(headers));
+          },
+        );
 
       switch ((headers[http2.constants.HTTP2_HEADER_STATUS] as any) as number) {
         case http2.constants.HTTP_STATUS_BAD_REQUEST:

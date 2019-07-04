@@ -153,6 +153,7 @@ export async function createServer(
           http2.constants.HTTP_STATUS_BAD_REQUEST,
       });
       stream.end(e.message);
+      return;
     }
     try {
       let resp = await handler(body, stream.session, stream);
