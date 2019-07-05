@@ -6,25 +6,50 @@ import path = require('path');
 import os = require('os');
 import url = require('url');
 
-const walkSync = sf.captureEnv(
-  function(dirPath: string, filelist: string[], recursive = false) {
-    function work(dirPath: string) {
-      const files = fs.readdirSync(dirPath);
-      files.forEach(function(file: string) {
-        if (recursive) {
-          if (fs.statSync(dirPath + file).isDirectory()) {
-            work(dirPath + file + '/');
-          } else {
-            filelist.push(dirPath + file);
-          }
-        } else {
-          if (!fs.statSync(dirPath + file).isDirectory()) {
-            filelist.push(dirPath + file);
-          }
-        }
-      });
+function walkSync(dirPath: string, filelist: string[], recursive = false) {
+  if (!dirPath.endsWith('/')) {
+    dirPath = dirPath + '/';
+  }
+
+  const files = fs.readdirSync(dirPath);
+  files.forEach(function(file: string) {
+    if (recursive) {
+      if (fs.statSync(dirPath + file).isDirectory()) {
+        walkSync(dirPath + file + '/', filelist, recursive);
+      } else {
+        filelist.push(dirPath + file);
+      }
+    } else {
+      if (!fs.statSync(dirPath + file).isDirectory()) {
+        filelist.push(dirPath + file);
+      }
     }
-    work(dirPath);
+  });
+}
+
+const capturedWalkSync = sf.captureEnv(walkSync, {
+  fs: sf.requireModule('fs'),
+});
+
+const recursiveMkdirSync = sf.captureEnv(
+  function(dirPath: string) {
+    if (!dirPath.startsWith('/')) {
+      throw new Error('only absoulte paths are supported');
+    }
+
+    if (fs.existsSync(dirPath)) {
+      return;
+    }
+
+    let curPath = '/';
+    const tokens = dirPath.split('/').filter(v => v.length > 0);
+
+    for (const token of tokens) {
+      curPath = curPath + token + '/';
+      if (!fs.existsSync(curPath)) {
+        fs.mkdirSync(curPath);
+      }
+    }
   },
   {
     fs: sf.requireModule('fs'),
@@ -94,11 +119,11 @@ export class SharedFsLoader implements FileLoader {
   ) => string[] | Promise<string[]> = sf.captureEnv(
     (baseUri: string, recursive: boolean) => {
       const fileList = [] as string[];
-      walkSync(baseUri, fileList, recursive);
+      capturedWalkSync(baseUri, fileList, recursive);
       return fileList;
     },
     {
-      walkSync,
+      capturedWalkSync,
     },
   );
 
@@ -125,7 +150,7 @@ export class SharedFsLoader implements FileLoader {
       const basePath = solvePath(baseUri);
 
       if (!fs.existsSync(basePath)) {
-        fs.mkdirSync(basePath);
+        recursiveMkdirSync(basePath);
       } else {
         if (!overwrite) {
           throw new Error(
@@ -141,6 +166,7 @@ export class SharedFsLoader implements FileLoader {
     {
       fs: sf.requireModule('fs'),
       path: sf.requireModule('path'),
+      recursiveMkdirSync,
       solvePath,
     },
   );
