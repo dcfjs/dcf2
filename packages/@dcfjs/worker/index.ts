@@ -125,6 +125,7 @@ export async function createLocalWorker(masterEndpoint: string) {
   });
 
   return (): Promise<void> => {
+    debug('Killing child process');
     cp.kill('SIGTERM');
     return new Promise(resolve => {
       cp.on('exit', (code, signal) => {

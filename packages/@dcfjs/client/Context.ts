@@ -44,7 +44,7 @@ export class Context {
 
           stream
             .pipe(split())
-            .on('data', function(line: string) {
+            .on('data', function (line: string) {
               if (!line) {
                 return;
               }
@@ -121,7 +121,7 @@ export class Context {
                 );
               };
             } else {
-              sendProgress = () => {};
+              sendProgress = () => { };
             }
 
             let current = 0;
@@ -133,20 +133,23 @@ export class Context {
               return p;
             }
 
-            const partitionResults = await Promise.all(
-              new Array(numPartitions).fill(0).map((v, i) => {
-                const f = partitionFunc(i, tempStorageSession);
-                if (Array.isArray(f)) {
-                  return tickAfter(dispatchWork(f[0]).then(f[1]));
-                }
-                return tickAfter(dispatchWork(f));
-              }),
-            );
+            try {
+              const partitionResults = await Promise.all(
+                new Array(numPartitions).fill(0).map((v, i) => {
+                  const f = partitionFunc(i, tempStorageSession);
+                  if (Array.isArray(f)) {
+                    return tickAfter(dispatchWork(f[0]).then(f[1]));
+                  }
+                  return tickAfter(dispatchWork(f));
+                }),
+              );
 
-            if (stream) {
-              await new Promise(resolve => stream!.end(resolve));
+              return await finalFunc(partitionResults, tempStorageSession);
+            } finally {
+              if (stream) {
+                await new Promise(resolve => stream!.end(resolve));
+              }
             }
-            return finalFunc(partitionResults, tempStorageSession);
           }) as ExecTask,
           {
             numPartitions,
