@@ -145,7 +145,6 @@ function localFsLoader(): { [key: string]: (...args: any[]) => any } {
     canHandleUrl: canHandleUrl,
     listFiles: sf.captureEnv(listFiles, {
       walkSync,
-      sf: sf.requireModule('@dcfjs/common/serializeFunction'),
       fs: sf.requireModule('fs'),
     }),
     createDataLoader: sf.captureEnv(createDataLoader, {
@@ -154,7 +153,6 @@ function localFsLoader(): { [key: string]: (...args: any[]) => any } {
     }),
     initSaveProgress: sf.captureEnv(initSaveProgress, {
       recursiveRemoveSync,
-      sf: sf.requireModule('@dcfjs/common/serializeFunction'),
       fs: sf.requireModule('fs'),
     }),
     createDataSaver: sf.captureEnv(createDataSaver, {
@@ -162,7 +160,6 @@ function localFsLoader(): { [key: string]: (...args: any[]) => any } {
       fs: sf.requireModule('fs'),
     }),
     markSaveSuccess: sf.captureEnv(markSaveSuccess, {
-      sf: sf.requireModule('@dcfjs/common/serializeFunction'),
       fs: sf.requireModule('fs'),
     }),
   };
@@ -315,41 +312,32 @@ function aliOSSLoader(config: {
   return {
     canHandleUrl: sf.captureEnv(canHandleUrl, {
       config,
-      urlLib: sf.requireModule('url'),
     }),
     listFiles: sf.captureEnv(listFiles, {
       config,
       parseOSSUrl,
-      sf: sf.requireModule('@dcfjs/common/serializeFunction'),
-      urlLib: sf.requireModule('url'),
       oss: sf.requireModule('ali-oss'),
     }),
     createDataLoader: sf.captureEnv(createDataLoader, {
       config,
       parseOSSUrl,
       sf: sf.requireModule('@dcfjs/common/serializeFunction'),
-      urlLib: sf.requireModule('url'),
       oss: sf.requireModule('ali-oss'),
     }),
     initSaveProgress: sf.captureEnv(initSaveProgress, {
       config,
       parseOSSUrl,
-      sf: sf.requireModule('@dcfjs/common/serializeFunction'),
-      urlLib: sf.requireModule('url'),
       oss: sf.requireModule('ali-oss'),
     }),
     createDataSaver: sf.captureEnv(createDataSaver, {
       config,
       parseOSSUrl,
       sf: sf.requireModule('@dcfjs/common/serializeFunction'),
-      urlLib: sf.requireModule('url'),
       oss: sf.requireModule('ali-oss'),
     }),
     markSaveSuccess: sf.captureEnv(markSaveSuccess, {
       config,
       parseOSSUrl,
-      sf: sf.requireModule('@dcfjs/common/serializeFunction'),
-      urlLib: sf.requireModule('url'),
       oss: sf.requireModule('ali-oss'),
     }),
   };
