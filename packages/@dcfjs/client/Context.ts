@@ -93,10 +93,6 @@ function localFsLoader(): { [key: string]: (...args: any[]) => any } {
   }
 
   function createDataLoader(baseUrl: string) {
-    if (!baseUrl.endsWith('/')) {
-      baseUrl = baseUrl + '/';
-    }
-
     function loader(filename: string) {
       return fs.readFileSync(filename);
     }
@@ -131,8 +127,8 @@ function localFsLoader(): { [key: string]: (...args: any[]) => any } {
   }
 
   function createDataSaver(baseUrl: string) {
-    function loader(filename: string, buffer: Buffer) {
-      return fs.writeFileSync(filename, buffer);
+    function loader(filename: string, buffer: Buffer, encoding = 'utf8') {
+      return fs.writeFileSync(filename, buffer, { encoding: encoding });
     }
 
     return sf.captureEnv(loader, {
@@ -618,6 +614,21 @@ export class Context {
 
   union<T>(...rdds: RDD<T>[]): RDD<T> {
     return new UnionRDD<T>(this, rdds);
+  }
+
+  getFileLoader(baseUrl: string) {
+    let selectedLoader: any;
+
+    for (const loader of this._fileLoaders) {
+      const canHandleUrlFunc = sf.deserializeFunction(loader.canHandleUrl);
+
+      if (canHandleUrlFunc(baseUrl)) {
+        selectedLoader = loader;
+        break;
+      }
+    }
+
+    return selectedLoader;
   }
 
   binaryFiles(

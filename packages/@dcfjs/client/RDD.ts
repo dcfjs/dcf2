@@ -267,6 +267,109 @@ export abstract class RDD<T> {
     );
   }
 
+  async saveAsTextFile(
+    baseUrl: string,
+    {
+      overwrite = true,
+      encoding = 'utf8',
+      extension = 'txt',
+
+      compressor,
+      functionEnv,
+    }: {
+      overwrite?: boolean;
+      encoding?: string;
+      extension?: string;
+
+      compressor?: (data: Buffer) => Buffer | Promise<Buffer>;
+      functionEnv?: FunctionEnv;
+    } = {},
+  ): Promise<void> {
+    const [numPartitions, partitionFunc, finalizedFunc] = await this.getFunc();
+
+    if (functionEnv && compressor) {
+      sf.captureEnv(compressor, functionEnv);
+      envDeprecated();
+    }
+
+    let selectedLoader = this._context.getFileLoader(baseUrl);
+
+    if (!selectedLoader) {
+      throw new Error('No loader found for ' + baseUrl);
+    }
+
+    const initSaveFunc = sf.deserializeFunction(
+      selectedLoader.initSaveProgress,
+    );
+    await initSaveFunc(baseUrl, overwrite);
+
+    return this._context.execute(
+      numPartitions,
+      sf.captureEnv(
+        partitionId => {
+          const f = partitionFunc(partitionId);
+          return sf.captureEnv(
+            workerId => {
+              return Promise.resolve(f(workerId))
+                .then(arr => {
+                  let content = Buffer.from(arr.join('\n') + '\n');
+
+                  return compressor
+                    ? Promise.resolve(compressor(content))
+                    : Promise.resolve(content);
+                })
+                .then(content => {
+                  const saveFunc = sf.deserializeFunction(
+                    selectedLoader.createDataSaver,
+                  )();
+
+                  return saveFunc(
+                    `${baseUrl}/part-${partitionId}.${extension}`,
+                    content,
+                    encoding,
+                  );
+                });
+            },
+            {
+              f,
+              baseUrl,
+              compressor,
+              encoding,
+              extension,
+              partitionId,
+              selectedLoader,
+              sf: sf.requireModule('@dcfjs/common/serializeFunction'),
+            },
+          );
+        },
+        {
+          baseUrl,
+          compressor,
+          encoding,
+          extension,
+          partitionFunc,
+          selectedLoader,
+          sf: sf.requireModule('@dcfjs/common/serializeFunction'),
+        },
+      ),
+      attachFinalizedFunc(
+        sf.captureEnv(
+          async () => {
+            const markFinishFunc = sf.deserializeFunction(
+              selectedLoader.markSaveSuccess,
+            );
+            await markFinishFunc(baseUrl);
+          },
+          {
+            baseUrl,
+            selectedLoader,
+            sf: sf.requireModule('@dcfjs/common/serializeFunction'),
+          },
+        ),
+      ),
+    );
+  }
+
   async reduce(
     reduceFunc: (a: T, b: T) => T,
     env?: FunctionEnv,
