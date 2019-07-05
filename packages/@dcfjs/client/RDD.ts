@@ -640,7 +640,7 @@ export abstract class RDD<T> {
   ): RDD<[K, [V[], V1[]]]> {
     return realGroupWith([this, other], this._context, numPartitions) as RDD<
       [K, [V[], V1[]]]
-      >;
+    >;
   }
 
   join<K, V, V1>(
@@ -846,7 +846,7 @@ export class UnionRDD<T> extends RDD<T> {
     for (let i = 0; i < this._dependences.length; i++) {
       const [numPartitions, func, finalizer] = await this._dependences[
         i
-        ].getFunc();
+      ].getFunc();
       partitionCounts.push(numPartitions);
       rddFuncs.push(func);
       if (finalizer) {
@@ -878,13 +878,13 @@ export class UnionRDD<T> extends RDD<T> {
       rddFinalizers.length === 0
         ? undefined
         : sf.captureEnv(
-        async (ts: sr.TempStorageSession) => {
-          for (const item of rddFinalizers) {
-            await item(ts);
-          }
-        },
-        { rddFinalizers },
-        ),
+            async (ts: sr.TempStorageSession) => {
+              for (const item of rddFinalizers) {
+                await item(ts);
+              }
+            },
+            { rddFinalizers },
+          ),
     ];
   }
 
@@ -1029,16 +1029,16 @@ export class CachedRDD<T> extends RDD<T> {
       ),
       autoUnpersist
         ? sf.captureEnv(
-        (ts: sr.TempStorageSession) => {
-          for (const partition of partitions) {
-            ts.release(storageType, partition);
-          }
-        },
-        {
-          partitions,
-          storageType,
-        },
-        )
+            (ts: sr.TempStorageSession) => {
+              for (const partition of partitions) {
+                ts.release(storageType, partition);
+              }
+            },
+            {
+              partitions,
+              storageType,
+            },
+          )
         : undefined,
     ];
   }
@@ -1322,7 +1322,7 @@ export class SortedRDD<T, K extends ComparableType> extends RDD<T> {
                     K,
                     number,
                     number
-                    ]);
+                  ]);
                 }
               }
               return ret;
@@ -1570,37 +1570,64 @@ export class CoalesceRDD<T> extends RDD<T> {
   }
 }
 
-export class LoadedFileRDD<T> extends RDD<T> {
-  private _function: PartitionFunc<T[]>;
+export class FileLoaderRDD extends RDD<[string, Buffer]> {
+  private _loaderFunc: (fileName: string) => Buffer | Promise<Buffer>;
   private _fileListFunc: () => string[] | Promise<string[]>;
-  private _numPartition: number;
+  private _fileList?: string[];
 
   constructor(
     context: Context,
-    partFunc: (paritionId: number) => () => T[] | Promise<T[]>,
     fileListFunc: () => string[] | Promise<string[]>,
-  );
-  constructor(
-    context: Context,
-    partFunc: (paritionId: number) => () => T[] | Promise<T[]>,
-    fileListFunc: () => string[] | Promise<string[]>,
+    loaderFunc: (fileName: string) => Buffer | Promise<Buffer>,
   ) {
     super(context);
 
-    this._numPartition = 0;
-
-    this._function = partFunc;
     this._fileListFunc = fileListFunc;
+    this._loaderFunc = loaderFunc;
   }
 
-  async getFunc(): Promise<RDDFuncs<T[]>> {
-    const fileList = await this._fileListFunc();
-    this._numPartition = fileList.length;
-
-    return [this._numPartition, this._function!, undefined];
+  private async _getFileList() {
+    if (!this._fileList) {
+      this._fileList = await this._fileListFunc();
+    }
   }
 
-  getNumPartitions() {
-    return this._numPartition > 0 ? this._numPartition : 1;
+  async getFunc(): Promise<RDDFuncs<[string, Buffer][]>> {
+    this._getFileList();
+    const fileList = this._fileList!;
+    const loaderFunc = this._loaderFunc;
+
+    return [
+      fileList.length,
+      sf.captureEnv(
+        partitionId => {
+          const fileName = fileList[partitionId];
+          return sf.captureEnv(
+            async () => {
+              return [
+                [fileName, await loaderFunc(fileName)] as [string, Buffer],
+              ];
+            },
+            {
+              fileName,
+              loaderFunc,
+            },
+          );
+        },
+        {
+          sf: sf.requireModule('@dcfjs/common/serializeFunction'),
+          loaderFunc,
+          fileList,
+        },
+      ),
+      undefined,
+    ];
+  }
+
+  async getNumPartitions() {
+    this._getFileList();
+    return this._fileList!.length;
   }
 }
+
+

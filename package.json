@@ -21,8 +21,6 @@
     "typescript": "^3.4.5"
   },
   "dependencies": {
-    "ali-oss": "^6.1.1",
-    "tslib": "^1.9.3",
-    "urijs": "^1.19.1"
+    "tslib": "^1.9.3"
   }
 }
