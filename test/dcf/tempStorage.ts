@@ -9,6 +9,12 @@ import { expect, assert } from 'chai';
 
 chai.use(chaiAsPromised);
 
+import { SharedFsLoader } from '@dcfjs/client';
+import sf = require('@dcfjs/common/serializeFunction');
+const path = require('path');
+const fs = require('fs');
+const zlib = require('zlib');
+
 function isPrime(v: number) {
   if (v < 2) {
     return false;
@@ -47,6 +53,22 @@ function concatArray(x1: any[], x2: any[]) {
   return x1.concat(x2);
 }
 
+function recursiveRemoveSync(dirPath: string) {
+  if (!dirPath.endsWith('/')) {
+    dirPath = dirPath + '/';
+  }
+
+  const files = fs.readdirSync(dirPath);
+  files.forEach(function(file: string) {
+    if (fs.statSync(dirPath + file).isDirectory()) {
+      recursiveRemoveSync(dirPath + file + '/');
+      fs.rmdirSync(dirPath + file + '/');
+    } else {
+      fs.unlinkSync(dirPath + file);
+    }
+  });
+}
+
 describe('MapReduce With local worker and sharedfs temp storage', () => {
   let dcc: Context;
 
@@ -66,10 +88,15 @@ describe('MapReduce With local worker and sharedfs temp storage', () => {
     }
 
     dcc = await createContext(server.endpoint);
+    dcc.registerFileLoader(new SharedFsLoader());
     autoRelease(() => dcc.close());
   });
 
   after(async () => {
+    const testFolderPath = path.resolve('./localFsLoaderTest/');
+    recursiveRemoveSync(testFolderPath);
+    fs.rmdirSync(testFolderPath);
+
     await releaseAll();
     context = null!;
   });
@@ -398,5 +425,50 @@ describe('MapReduce With local worker and sharedfs temp storage', () => {
     expect(await tmp2.max()).equals(max - 1);
     expect(await tmp2.min()).equals(0);
     expect(await tmp2.reduce((a, b) => a + b)).equals(49995000 + 3123750);
+  }).timeout(10000);
+
+  it('Test loaders', async () => {
+    const max = 10000;
+    for (let i = 0; i < 3; i++) {
+      const absPath = path.resolve('./localFsLoaderTest/test' + i);
+
+      await dcc
+        .range(0, max)
+        .repartition(10)
+        .saveAsTextFile(absPath, {
+          overwrite: true,
+          extension: 'gz',
+          compressor: sf.captureEnv(
+            buf => {
+              return zlib.gzipSync(buf);
+            },
+            {
+              zlib: sf.requireModule('zlib'),
+            },
+          ),
+        });
+    }
+
+    const absPath = path.resolve('./localFsLoaderTest/');
+    const tmp = dcc
+      .textFile(absPath, {
+        recursive: true,
+        decompressor: buf => {
+          // Skip empty file.
+          if (buf.length === 0) {
+            return buf;
+          }
+          return zlib.gunzipSync(buf);
+        },
+        functionEnv: {
+          zlib: sf.requireModule('zlib'),
+        },
+      })
+      .map((v: string) => parseInt(v));
+
+    expect(await tmp.count()).equals(max * 3);
+    expect(await tmp.max()).equals(max - 1);
+    expect(await tmp.min()).equals(0);
+    expect(await tmp.reduce((a, b) => a + b)).equals(49995000 * 3);
   }).timeout(10000);
 });

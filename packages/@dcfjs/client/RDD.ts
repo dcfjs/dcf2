@@ -298,10 +298,9 @@ export abstract class RDD<T> {
       throw new Error('No loader found for ' + baseUrl);
     }
 
-    const initSaveFunc = sf.deserializeFunction(
-      selectedLoader.initSaveProgress,
-    );
-    await initSaveFunc(baseUrl, overwrite);
+    await selectedLoader.initSaveProgress(baseUrl, overwrite);
+    const saveFileFunc = selectedLoader!.saveFile;
+    const markSaveSuccessFunc = selectedLoader!.markSaveSuccess;
 
     return this._context.execute(
       numPartitions,
@@ -312,21 +311,17 @@ export abstract class RDD<T> {
             workerId => {
               return Promise.resolve(f(workerId))
                 .then(arr => {
-                  let content = Buffer.from(arr.join('\n') + '\n');
+                  let content = Buffer.from(arr.join('\n'));
 
                   return compressor
                     ? Promise.resolve(compressor(content))
                     : Promise.resolve(content);
                 })
                 .then(content => {
-                  const saveFunc = sf.deserializeFunction(
-                    selectedLoader.createDataSaver,
-                  )();
-
-                  return saveFunc(
-                    `${baseUrl}/part-${partitionId}.${extension}`,
-                    content,
-                    encoding,
+                  return saveFileFunc(
+                    baseUrl,
+                    `part-${partitionId}.${extension}`,
+                    content
                   );
                 });
             },
@@ -337,7 +332,7 @@ export abstract class RDD<T> {
               encoding,
               extension,
               partitionId,
-              selectedLoader,
+              saveFileFunc,
               sf: sf.requireModule('@dcfjs/common/serializeFunction'),
             },
           );
@@ -348,21 +343,18 @@ export abstract class RDD<T> {
           encoding,
           extension,
           partitionFunc,
-          selectedLoader,
+          saveFileFunc,
           sf: sf.requireModule('@dcfjs/common/serializeFunction'),
         },
       ),
       attachFinalizedFunc(
         sf.captureEnv(
           async () => {
-            const markFinishFunc = sf.deserializeFunction(
-              selectedLoader.markSaveSuccess,
-            );
-            await markFinishFunc(baseUrl);
+            await markSaveSuccessFunc(baseUrl);
           },
           {
             baseUrl,
-            selectedLoader,
+            markSaveSuccessFunc,
             sf: sf.requireModule('@dcfjs/common/serializeFunction'),
           },
         ),
@@ -1593,7 +1585,7 @@ export class FileLoaderRDD extends RDD<[string, Buffer]> {
   }
 
   async getFunc(): Promise<RDDFuncs<[string, Buffer][]>> {
-    this._getFileList();
+    await this._getFileList();
     const fileList = this._fileList!;
     const loaderFunc = this._loaderFunc;
 
