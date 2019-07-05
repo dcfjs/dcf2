@@ -537,7 +537,7 @@ export abstract class RDD<T> {
   ): RDD<[K, [V[], V1[]]]> {
     return realGroupWith([this, other], this._context, numPartitions) as RDD<
       [K, [V[], V1[]]]
-    >;
+      >;
   }
 
   join<K, V, V1>(
@@ -743,7 +743,7 @@ export class UnionRDD<T> extends RDD<T> {
     for (let i = 0; i < this._dependences.length; i++) {
       const [numPartitions, func, finalizer] = await this._dependences[
         i
-      ].getFunc();
+        ].getFunc();
       partitionCounts.push(numPartitions);
       rddFuncs.push(func);
       if (finalizer) {
@@ -775,13 +775,13 @@ export class UnionRDD<T> extends RDD<T> {
       rddFinalizers.length === 0
         ? undefined
         : sf.captureEnv(
-            async (ts: sr.TempStorageSession) => {
-              for (const item of rddFinalizers) {
-                await item(ts);
-              }
-            },
-            { rddFinalizers },
-          ),
+        async (ts: sr.TempStorageSession) => {
+          for (const item of rddFinalizers) {
+            await item(ts);
+          }
+        },
+        { rddFinalizers },
+        ),
     ];
   }
 
@@ -926,16 +926,16 @@ export class CachedRDD<T> extends RDD<T> {
       ),
       autoUnpersist
         ? sf.captureEnv(
-            (ts: sr.TempStorageSession) => {
-              for (const partition of partitions) {
-                ts.release(storageType, partition);
-              }
-            },
-            {
-              partitions,
-              storageType,
-            },
-          )
+        (ts: sr.TempStorageSession) => {
+          for (const partition of partitions) {
+            ts.release(storageType, partition);
+          }
+        },
+        {
+          partitions,
+          storageType,
+        },
+        )
         : undefined,
     ];
   }
@@ -1219,7 +1219,7 @@ export class SortedRDD<T, K extends ComparableType> extends RDD<T> {
                     K,
                     number,
                     number
-                  ]);
+                    ]);
                 }
               }
               return ret;
@@ -1464,5 +1464,40 @@ export class CoalesceRDD<T> extends RDD<T> {
 
   getNumPartitions() {
     return this._numPartition;
+  }
+}
+
+export class LoadedFileRDD<T> extends RDD<T> {
+  private _function: PartitionFunc<T[]>;
+  private _fileListFunc: () => string[];
+  private _numPartition: number;
+
+  constructor(
+    context: Context,
+    partFunc: (paritionId: number) => () => T[] | Promise<T[]>,
+    fileListFunc: () => string[],
+  );
+  constructor(
+    context: Context,
+    partFunc: (paritionId: number) => () => T[] | Promise<T[]>,
+    fileListFunc: () => string[],
+  ) {
+    super(context);
+
+    this._numPartition = 0;
+
+    this._function = partFunc;
+    this._fileListFunc = fileListFunc;
+  }
+
+  async getFunc(): Promise<RDDFuncs<T[]>> {
+    const fileList = await this._fileListFunc();
+    this._numPartition = fileList.length;
+
+    return [this._numPartition, this._function!, undefined];
+  }
+
+  getNumPartitions() {
+    return this._numPartition > 0 ? this._numPartition : 1;
   }
 }

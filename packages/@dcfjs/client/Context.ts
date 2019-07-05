@@ -1,15 +1,16 @@
 import '@dcfjs/common/noCaptureEnv';
 import { TempStorageSession } from './../common/storageRegistry';
-import { CleanupFunction } from './../common/autoRelease';
-import { UnionRDD } from './RDD';
-import { createClient, Client } from '@dcfjs/common/client';
-import { RDD, GeneratedRDD, PartitionFunc } from './RDD';
+import { GeneratedRDD, LoadedFileRDD, RDD, UnionRDD } from './RDD';
+import { Client, createClient } from '@dcfjs/common/client';
 import * as http2 from 'http2';
 import sf = require('@dcfjs/common/serializeFunction');
 import { ExecTask } from '@dcfjs/master';
-import split = require('split');
 import * as ProgressBar from 'progress';
+import { FunctionEnv, SerializedFunction } from '@dcfjs/common';
+import split = require('split');
+
 const v8 = require('v8');
+const fs = require('fs');
 
 export interface ContextOption {
   showProgress: boolean;
@@ -25,9 +26,146 @@ const defaultOption: ContextOption = {
   defaultRepartitionStorage: 'disk',
 };
 
+const walkSync = sf.captureEnv(
+  function(dirPath: string, filelist: string[], recursive = false) {
+    const files = fs.readdirSync(dirPath);
+    files.forEach(function(file: string) {
+      if (recursive) {
+        if (fs.statSync(dirPath + file).isDirectory()) {
+          walkSync(dirPath + file + '/', filelist, recursive);
+        } else {
+          filelist.push(dirPath + file);
+        }
+      } else {
+        if (!fs.statSync(dirPath + file).isDirectory()) {
+          filelist.push(dirPath + file);
+        }
+      }
+    });
+  },
+  {
+    fs: sf.requireModule('fs'),
+  },
+);
+
+const recursiveRemoveSync = sf.captureEnv(
+  function(dirPath: string) {
+    if (!dirPath.endsWith('/')) {
+      dirPath = dirPath + '/';
+    }
+
+    const files = fs.readdirSync(dirPath);
+    files.forEach(function(file: string) {
+      if (fs.statSync(dirPath + file).isDirectory()) {
+        recursiveRemoveSync(dirPath + file + '/');
+        fs.rmdirSync(dirPath + file + '/');
+      } else {
+        fs.unlinkSync(dirPath + file);
+      }
+    });
+  },
+  {
+    fs: sf.requireModule('fs'),
+  },
+);
+
+function localFsLoader(
+  config: any,
+): { [key: string]: (...args: any[]) => any } {
+  function canHandleUrl(baseUrl: string) {
+    return baseUrl[0] === '/';
+  }
+
+  function listFiles(baseUrl: string, recursive = false) {
+    const fileList = [] as string[];
+    walkSync(baseUrl, fileList, recursive);
+    return fileList;
+  }
+
+  function createDataLoader(baseUrl: string) {
+    if (!baseUrl.endsWith('/')) {
+      baseUrl = baseUrl + '/';
+    }
+
+    function loader(filename: string) {
+      return fs.readFileSync(filename);
+    }
+
+    return sf.captureEnv(loader, {
+      fs: sf.requireModule('fs'),
+    });
+  }
+
+  function initSaveProgress(baseUrl: string, overwrite: boolean) {
+    if (!fs.statSync(baseUrl).isDirectory()) {
+      throw new Error(`${baseUrl} is not a folder.`);
+    }
+
+    if (!baseUrl.endsWith('/')) {
+      baseUrl = baseUrl + '/';
+    }
+
+    if (overwrite) {
+      // remove all files under baseUrl;
+      recursiveRemoveSync(baseUrl);
+    } else {
+      const fileList = fs.readdirSync(baseUrl);
+      if (fileList.length > 0) {
+        throw new Error(
+          `${baseUrl} is not empty, consider use overwrite=true?`,
+        );
+      }
+    }
+
+    fs.writeFileSync(baseUrl + '.writing', Buffer.alloc(0));
+  }
+
+  function createDataSaver(baseUrl: string) {
+    function loader(filename: string, buffer: Buffer) {
+      return fs.writeFileSync(filename, buffer);
+    }
+
+    return sf.captureEnv(loader, {
+      fs: sf.requireModule('fs'),
+    });
+  }
+
+  function markSaveSuccess(baseUrl: string) {
+    fs.writeFileSync(baseUrl + '.success', Buffer.alloc(0));
+    fs.unlinkSync(baseUrl + '.writing');
+  }
+
+  return {
+    canHandleUrl: canHandleUrl,
+    listFiles: sf.captureEnv(listFiles, {
+      walkSync,
+      sf: sf.requireModule('@dcfjs/common/serializeFunction'),
+      fs: sf.requireModule('fs'),
+    }),
+    createDataLoader: sf.captureEnv(createDataLoader, {
+      sf: sf.requireModule('@dcfjs/common/serializeFunction'),
+      fs: sf.requireModule('fs'),
+    }),
+    initSaveProgress: sf.captureEnv(initSaveProgress, {
+      recursiveRemoveSync,
+      sf: sf.requireModule('@dcfjs/common/serializeFunction'),
+      fs: sf.requireModule('fs'),
+    }),
+    createDataSaver: sf.captureEnv(createDataSaver, {
+      sf: sf.requireModule('@dcfjs/common/serializeFunction'),
+      fs: sf.requireModule('fs'),
+    }),
+    markSaveSuccess: sf.captureEnv(markSaveSuccess, {
+      sf: sf.requireModule('@dcfjs/common/serializeFunction'),
+      fs: sf.requireModule('fs'),
+    }),
+  };
+}
+
 export class Context {
   private _client: Client;
   private _option: ContextOption;
+  private _fileLoaders: { [key: string]: SerializedFunction<any> }[] = [];
 
   constructor(client: Client, option?: Partial<ContextOption>) {
     this._client = client;
@@ -44,7 +182,7 @@ export class Context {
 
           stream
             .pipe(split())
-            .on('data', function (line: string) {
+            .on('data', function(line: string) {
               if (!line) {
                 return;
               }
@@ -83,6 +221,29 @@ export class Context {
 
   get option() {
     return this._option;
+  }
+
+  registerFileLoader(loaderFuncs: { [key: string]: (...args: any[]) => any }) {
+    const validFuncNames = [
+      'canHandleUrl',
+      'listFiles',
+      'createDataLoader',
+      'initSaveProgress',
+      'createDataSaver',
+      'markSaveSuccess',
+    ];
+
+    const registerObj = {} as { [key: string]: SerializedFunction<any> };
+
+    for (const funcName of validFuncNames) {
+      if (!loaderFuncs[funcName]) {
+        throw new Error(`Loader function ${funcName} not implemented.`);
+      }
+
+      registerObj[funcName] = sf.serializeFunction(loaderFuncs[funcName]);
+    }
+
+    this._fileLoaders.push(registerObj);
   }
 
   close(): Promise<void> {
@@ -261,8 +422,159 @@ export class Context {
   union<T>(...rdds: RDD<T>[]): RDD<T> {
     return new UnionRDD<T>(this, rdds);
   }
+
+  binaryFiles(
+    baseUrl: string,
+    {
+      recursive = false,
+    }: {
+      recursive?: boolean;
+    } = {},
+  ): RDD<[string, Buffer]> {
+    let selectedLoader: any;
+
+    for (const loader of this._fileLoaders) {
+      const canHandleUrlFunc = sf.deserializeFunction(loader.canHandleUrl);
+
+      if (canHandleUrlFunc(baseUrl)) {
+        selectedLoader = loader;
+        break;
+      }
+    }
+
+    if (!selectedLoader) {
+      throw new Error('No loader found for ' + baseUrl);
+    }
+
+    return new LoadedFileRDD<[string, Buffer]>(
+      this,
+      sf.captureEnv(
+        partitionId =>
+          sf.captureEnv(
+            () => {
+              const deserialized = {} as {
+                [key: string]: (...args: any[]) => any;
+              };
+
+              for (const key of Object.keys(selectedLoader)) {
+                deserialized[key] = sf.deserializeFunction(selectedLoader[key]);
+              }
+
+              let fileList = sf.deserializeFunction(selectedLoader.listFiles)(
+                baseUrl,
+                recursive,
+              );
+              const fileName = fileList[partitionId];
+
+              const loader = deserialized.createDataLoader(baseUrl);
+
+              const fileContent = loader(fileName);
+
+              return [[fileName, fileContent]];
+            },
+            {
+              partitionId,
+              baseUrl,
+              recursive,
+              selectedLoader,
+              fs: sf.requireModule('fs'),
+              sf: sf.requireModule('@dcfjs/common/serializeFunction'),
+            },
+          ),
+        {
+          baseUrl,
+          recursive,
+          selectedLoader,
+          sf: sf.requireModule('@dcfjs/common/serializeFunction'),
+        },
+      ),
+      sf.captureEnv(
+        () => {
+          return sf.deserializeFunction(selectedLoader.listFiles)(
+            baseUrl,
+            recursive,
+          );
+        },
+        {
+          baseUrl,
+          recursive,
+          selectedLoader: selectedLoader,
+        },
+      ),
+    );
+  }
+
+  wholeTextFiles(
+    baseUrl: string,
+    {
+      decompressor,
+      encoding = 'utf8',
+      recursive = false,
+      functionEnv,
+    }: {
+      encoding?: string;
+      recursive?: boolean;
+
+      decompressor?: (data: Buffer, filename: string) => Buffer;
+      functionEnv?: FunctionEnv;
+    } = {},
+  ): RDD<[string, string]> {
+    if (typeof encoding === 'boolean') {
+      recursive = encoding;
+      encoding = 'utf-8';
+    }
+    if (typeof decompressor === 'function') {
+      sf.captureEnv(decompressor, functionEnv!);
+    }
+    return this.binaryFiles(baseUrl, { recursive }).mapPartitions(
+      v => {
+        let buf = v[0][1];
+        if (decompressor) {
+          buf = decompressor(buf, v[0][0]);
+        }
+        return [[v[0][0], buf.toString(encoding)] as [string, string]];
+      },
+      { encoding, decompressor },
+    );
+  }
+
+  textFile(
+    baseUrl: string,
+    options?: {
+      encoding?: string;
+      recursive?: boolean;
+
+      decompressor?: (data: Buffer, filename: string) => Buffer;
+      functionEnv?: FunctionEnv;
+
+      __dangerousDontCopy?: boolean;
+    },
+  ): RDD<string> {
+    const { __dangerousDontCopy: dontCopy = false } = options || {};
+
+    return this.wholeTextFiles(baseUrl, options).flatMap(
+      (v: any) => {
+        const ret = v[1].replace(/\\r/m, '').split('\n');
+        // Remove last empty line.
+        if (!ret[ret.length - 1]) {
+          ret.pop();
+        }
+        if (dontCopy) {
+          return ret;
+        }
+        // Fix memory leak: sliced string keep reference of huge string
+        // see https://bugs.chromium.org/p/v8/issues/detail?id=2869
+        return ret.map((v: any) => (' ' + v).substr(1));
+      },
+      {
+        dontCopy,
+      },
+    );
+  }
 }
 
 export async function createContext(masterEndpoint: string) {
-  return new Context(await createClient(masterEndpoint));
+  const context = new Context(await createClient(masterEndpoint));
+  context.registerFileLoader(localFsLoader({}));
+  return context;
 }
