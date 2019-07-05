@@ -11,6 +11,8 @@ import split = require('split');
 
 const v8 = require('v8');
 const fs = require('fs');
+const urlLib = require('url');
+const oss = require('ali-oss');
 
 export interface ContextOption {
   showProgress: boolean;
@@ -69,9 +71,17 @@ const recursiveRemoveSync = sf.captureEnv(
   },
 );
 
-function localFsLoader(
-  config: any,
-): { [key: string]: (...args: any[]) => any } {
+const parseOSSUrl = sf.captureEnv(
+  function(baseUrl: string) {
+    const url = urlLib.parse(baseUrl);
+    return [url.host, url.path.substr(1)];
+  },
+  {
+    urlLib: sf.requireModule('url'),
+  },
+);
+
+function localFsLoader(): { [key: string]: (...args: any[]) => any } {
   function canHandleUrl(baseUrl: string) {
     return baseUrl[0] === '/';
   }
@@ -158,6 +168,193 @@ function localFsLoader(
     markSaveSuccess: sf.captureEnv(markSaveSuccess, {
       sf: sf.requireModule('@dcfjs/common/serializeFunction'),
       fs: sf.requireModule('fs'),
+    }),
+  };
+}
+
+function aliOSSLoader(config: {
+  accessKeyId: string;
+  accessKeySecret: string;
+  bucket: string;
+  region: string;
+  internal: boolean;
+}) {
+  function canHandleUrl(baseUrl: string) {
+    return baseUrl.indexOf(`oss://${config.bucket}/`) === 0;
+  }
+
+  async function listFiles(baseUrl: string, recursive = false) {
+    const store = oss(config);
+    const [bucket, prefix] = parseOSSUrl(baseUrl);
+    const ret = [];
+
+    let marker = null;
+
+    for (;;) {
+      let nextMarker: any, objects: any;
+      ({ nextMarker, objects } = await store.list({
+        prefix: prefix,
+        delimiter: recursive ? null : '/',
+        marker,
+      }));
+      if (objects) {
+        ret.push(objects.map((v: any) => v.name));
+      }
+      if (nextMarker === null) {
+        break;
+      }
+      marker = nextMarker;
+    }
+
+    return []
+      .concat(...ret)
+      .map((v: string) => v.substr(prefix.length))
+      .filter(v => !v.startsWith('.'));
+  }
+
+  function createDataLoader(baseUrl: string) {
+    let store = [] as any[];
+    const [bucket, prefix] = parseOSSUrl(baseUrl);
+
+    async function loader(filename: string) {
+      if (!store[0]) {
+        store[0] = oss(config).useBucket(bucket);
+      }
+      const finalName = prefix + filename;
+      const info = await store[0].head(finalName);
+      const fileSize = +info.res.headers['content-length'];
+      if (fileSize > 1 << 16) {
+        // download with multi thread.
+        const threadCount = 8;
+        const range = [];
+        for (let i = 0; i < threadCount; i++) {
+          range.push(Math.floor((fileSize / threadCount) * i));
+        }
+        range.push(fileSize);
+        const works = [];
+        for (let i = 0; i < threadCount; i++) {
+          if (!store[i]) {
+            store[i] = oss(config).useBucket(bucket);
+          }
+          works.push(
+            store[i].get(finalName, {
+              headers: { Range: `bytes=${range[i]}-${range[i + 1] - 1}` },
+            }),
+          );
+        }
+        const resps = (await Promise.all(works)).map(v => v.content);
+        return Buffer.concat(resps);
+      }
+      return store[0].get(finalName).then((v: any) => v.content);
+    }
+
+    return sf.captureEnv(loader, {
+      config,
+      store,
+      bucket,
+      prefix,
+      oss: sf.requireModule('ali-oss'),
+    });
+  }
+
+  async function initSaveProgress(baseUrl: string, overwrite = false) {
+    const store = oss(config);
+    const [bucket, prefix] = parseOSSUrl(baseUrl);
+    if (overwrite) {
+      // delete every file with same prefix. Dangerous!
+      for (;;) {
+        const { objects } = await store.list({
+          prefix: prefix,
+          'max-keys': 1,
+        });
+
+        if (!objects || !objects.length) {
+          break;
+        }
+        await store.deleteMulti(objects.map((v: any) => v.name));
+      }
+    } else {
+      // Check there's any file with same prefix.
+      const { objects } = await store.list({
+        prefix: prefix,
+        'max-keys': 1,
+      });
+      if (objects && objects.length) {
+        throw new Error(
+          `${baseUrl} already exists, consider use overwrite=true?`,
+        );
+      }
+    }
+    await store.put(prefix + '.writing', Buffer.alloc(0));
+  }
+
+  function createDataSaver(baseUrl: string) {
+    let store = null as any;
+    const [bucket, prefix] = parseOSSUrl(baseUrl);
+
+    function loader(filename: string, buffer: Buffer) {
+      if (!store) {
+        store = oss(config);
+        store.useBucket(bucket);
+      }
+      return store.put(prefix + filename, buffer);
+    }
+
+    return sf.captureEnv(loader, {
+      config,
+      store,
+      bucket,
+      prefix,
+      oss: sf.requireModule('ali-oss'),
+    });
+  }
+
+  async function markSaveSuccess(baseUrl: string) {
+    const store = oss(config);
+    const [bucket, prefix] = parseOSSUrl(baseUrl);
+    await store.put(prefix + '.success', Buffer.alloc(0));
+    await store.delete(prefix + '.writing');
+  }
+
+  return {
+    canHandleUrl: sf.captureEnv(canHandleUrl, {
+      config,
+      urlLib: sf.requireModule('url'),
+    }),
+    listFiles: sf.captureEnv(listFiles, {
+      config,
+      parseOSSUrl,
+      sf: sf.requireModule('@dcfjs/common/serializeFunction'),
+      urlLib: sf.requireModule('url'),
+      oss: sf.requireModule('ali-oss'),
+    }),
+    createDataLoader: sf.captureEnv(createDataLoader, {
+      config,
+      parseOSSUrl,
+      sf: sf.requireModule('@dcfjs/common/serializeFunction'),
+      urlLib: sf.requireModule('url'),
+      oss: sf.requireModule('ali-oss'),
+    }),
+    initSaveProgress: sf.captureEnv(initSaveProgress, {
+      config,
+      parseOSSUrl,
+      sf: sf.requireModule('@dcfjs/common/serializeFunction'),
+      urlLib: sf.requireModule('url'),
+      oss: sf.requireModule('ali-oss'),
+    }),
+    createDataSaver: sf.captureEnv(createDataSaver, {
+      config,
+      parseOSSUrl,
+      sf: sf.requireModule('@dcfjs/common/serializeFunction'),
+      urlLib: sf.requireModule('url'),
+      oss: sf.requireModule('ali-oss'),
+    }),
+    markSaveSuccess: sf.captureEnv(markSaveSuccess, {
+      config,
+      parseOSSUrl,
+      sf: sf.requireModule('@dcfjs/common/serializeFunction'),
+      urlLib: sf.requireModule('url'),
+      oss: sf.requireModule('ali-oss'),
     }),
   };
 }
@@ -460,24 +657,22 @@ export class Context {
                 deserialized[key] = sf.deserializeFunction(selectedLoader[key]);
               }
 
-              let fileList = sf.deserializeFunction(selectedLoader.listFiles)(
-                baseUrl,
-                recursive,
-              );
-              const fileName = fileList[partitionId];
+              return Promise.resolve(
+                deserialized.listFiles(baseUrl, recursive),
+              ).then(fileList => {
+                const fileName = fileList[partitionId];
 
-              const loader = deserialized.createDataLoader(baseUrl);
-
-              const fileContent = loader(fileName);
-
-              return [[fileName, fileContent]];
+                const loader = deserialized.createDataLoader(baseUrl);
+                return Promise.resolve(loader(fileName)).then(fileContent => {
+                  return [[fileName, fileContent]];
+                });
+              });
             },
             {
               partitionId,
               baseUrl,
               recursive,
               selectedLoader,
-              fs: sf.requireModule('fs'),
               sf: sf.requireModule('@dcfjs/common/serializeFunction'),
             },
           ),
@@ -490,10 +685,8 @@ export class Context {
       ),
       sf.captureEnv(
         () => {
-          return sf.deserializeFunction(selectedLoader.listFiles)(
-            baseUrl,
-            recursive,
-          );
+          const fileListFunc = sf.deserializeFunction(selectedLoader.listFiles);
+          return Promise.resolve(fileListFunc(baseUrl, recursive));
         },
         {
           baseUrl,
@@ -575,6 +768,6 @@ export class Context {
 
 export async function createContext(masterEndpoint: string) {
   const context = new Context(await createClient(masterEndpoint));
-  context.registerFileLoader(localFsLoader({}));
+  context.registerFileLoader(localFsLoader());
   return context;
 }

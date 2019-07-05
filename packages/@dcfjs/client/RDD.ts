@@ -1469,18 +1469,18 @@ export class CoalesceRDD<T> extends RDD<T> {
 
 export class LoadedFileRDD<T> extends RDD<T> {
   private _function: PartitionFunc<T[]>;
-  private _fileListFunc: () => string[];
+  private _fileListFunc: () => string[] | Promise<string[]>;
   private _numPartition: number;
 
   constructor(
     context: Context,
     partFunc: (paritionId: number) => () => T[] | Promise<T[]>,
-    fileListFunc: () => string[],
+    fileListFunc: () => string[] | Promise<string[]>,
   );
   constructor(
     context: Context,
     partFunc: (paritionId: number) => () => T[] | Promise<T[]>,
-    fileListFunc: () => string[],
+    fileListFunc: () => string[] | Promise<string[]>,
   ) {
     super(context);
 
