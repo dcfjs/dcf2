@@ -334,14 +334,16 @@ export class Context {
       sf.captureEnv(decompressor, functionEnv!);
     }
     return this.binaryFiles(baseUrl, { recursive }).mapPartitions(
-      v => {
-        let buf = v[0][1];
-        if (decompressor) {
-          buf = decompressor(buf, v[0][0]);
-        }
-        return [[v[0][0], buf.toString(encoding)] as [string, string]];
-      },
-      { encoding, decompressor },
+      sf.captureEnv(
+        v => {
+          let buf = v[0][1];
+          if (decompressor) {
+            buf = decompressor(buf, v[0][0]);
+          }
+          return [[v[0][0], buf.toString(encoding)] as [string, string]];
+        },
+        { encoding, decompressor },
+      ),
     );
   }
 
@@ -360,22 +362,24 @@ export class Context {
     const { __dangerousDontCopy: dontCopy = false } = options || {};
 
     return this.wholeTextFiles(baseUrl, options).flatMap(
-      (v: any) => {
-        const ret = v[1].replace(/\\r/m, '').split('\n');
-        // Remove last empty line.
-        if (!ret[ret.length - 1]) {
-          ret.pop();
-        }
-        if (dontCopy) {
-          return ret;
-        }
-        // Fix memory leak: sliced string keep reference of huge string
-        // see https://bugs.chromium.org/p/v8/issues/detail?id=2869
-        return ret.map((v: any) => (' ' + v).substr(1));
-      },
-      {
-        dontCopy,
-      },
+      sf.captureEnv(
+        (v: any) => {
+          const ret = v[1].replace(/\\r/m, '').split('\n');
+          // Remove last empty line.
+          if (!ret[ret.length - 1]) {
+            ret.pop();
+          }
+          if (dontCopy) {
+            return ret;
+          }
+          // Fix memory leak: sliced string keep reference of huge string
+          // see https://bugs.chromium.org/p/v8/issues/detail?id=2869
+          return ret.map((v: any) => (' ' + v).substr(1));
+        },
+        {
+          dontCopy,
+        },
+      ),
     );
   }
 }
