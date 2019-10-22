@@ -28,6 +28,9 @@ function serializeValue(v: any): any {
     if (Array.isArray(v)) {
       return v.map(serializeValue);
     }
+    if (v instanceof RegExp || v instanceof Buffer) {
+      return v;
+    }
     if (v.constructor !== Object) {
       throw new Error(`Cannot pass a ${v.constructor.name} object`);
     }
