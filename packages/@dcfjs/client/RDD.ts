@@ -321,7 +321,7 @@ export abstract class RDD<T> {
                   return saveFileFunc(
                     baseUrl,
                     `part-${partitionId}.${extension}`,
-                    content
+                    content,
                   );
                 });
             },
@@ -1313,7 +1313,7 @@ export class SortedRDD<T, K extends ComparableType> extends RDD<T> {
                   ret.push([keyFunc(v[i]), partitionId, i] as [
                     K,
                     number,
-                    number
+                    number,
                   ]);
                 }
               }
@@ -1621,5 +1621,3 @@ export class FileLoaderRDD extends RDD<[string, Buffer]> {
     return this._fileList!.length;
   }
 }
-
-
