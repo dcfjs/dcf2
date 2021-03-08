@@ -7,7 +7,7 @@ import { Context } from './Context';
 import ah = require('@dcfjs/common/arrayHelpers');
 import sf = require('@dcfjs/common/serializeFunction');
 import sr = require('@dcfjs/common/storageRegistry');
-const XXHash = require('xxhash');
+const XXHash = require('js-xxhash');
 const pack = require('@dcfjs/objpack');
 const v8 = require('v8');
 
@@ -40,7 +40,7 @@ function hashPartitionFunc<V>(numPartitions: number) {
     {
       numPartitions,
       seed,
-      XXHash: sf.requireModule('xxhash'),
+      XXHash: sf.requireModule('js-xxhash'),
       pack: sf.requireModule('@dcfjs/objpack'),
     },
   );
@@ -109,7 +109,7 @@ export abstract class RDD<T> {
   getNumPartitions(): number | Promise<number> {
     const tmp = this.getFunc();
     if (tmp instanceof Promise) {
-      return tmp.then(v => v[0]);
+      return tmp.then((v) => v[0]);
     }
     return tmp[0];
   }
@@ -134,11 +134,11 @@ export abstract class RDD<T> {
     return this._context.execute(
       numPartitions,
       sf.captureEnv(
-        partitionId => {
+        (partitionId) => {
           const f = partitionFunc(partitionId);
           return sf.captureEnv(
             (workerId: string) => {
-              return Promise.resolve(f(workerId)).then(v => v.length);
+              return Promise.resolve(f(workerId)).then((v) => v.length);
             },
             { f },
           ) as () => Promise<number>;
@@ -148,7 +148,7 @@ export abstract class RDD<T> {
           sf: sf.requireModule('@dcfjs/common/serializeFunction'),
         },
       ),
-      attachFinalizedFunc(v => v.reduce((a, b) => a + b, 0), finalizedFunc),
+      attachFinalizedFunc((v) => v.reduce((a, b) => a + b, 0), finalizedFunc),
     );
   }
 
@@ -158,11 +158,13 @@ export abstract class RDD<T> {
     return this._context.execute(
       numPartitions,
       sf.captureEnv(
-        partitionId => {
+        (partitionId) => {
           const f = partitionFunc(partitionId);
           return sf.captureEnv(
             (workerId: string) => {
-              return Promise.resolve(f(workerId)).then(v => v.slice(0, count));
+              return Promise.resolve(f(workerId)).then((v) =>
+                v.slice(0, count),
+              );
             },
             { f, count },
           );
@@ -174,7 +176,7 @@ export abstract class RDD<T> {
         },
       ),
       attachFinalizedFunc(
-        sf.captureEnv(v => ah.concatArrays(v).slice(0, count), {
+        sf.captureEnv((v) => ah.concatArrays(v).slice(0, count), {
           count,
           ah: sf.requireModule('@dcfjs/common/arrayHelpers'),
         }),
@@ -231,7 +233,7 @@ export abstract class RDD<T> {
   }
 
   glom(): RDD<T[]> {
-    return this.mapPartitions(v => [v]);
+    return this.mapPartitions((v) => [v]);
   }
 
   map<T1>(transformer: (input: T) => T1, env?: FunctionEnv): RDD<T1> {
@@ -240,7 +242,7 @@ export abstract class RDD<T> {
       envDeprecated();
     }
     return this.mapPartitions(
-      sf.captureEnv(v => v.map(v => transformer(v)), { transformer }),
+      sf.captureEnv((v) => v.map((v) => transformer(v)), { transformer }),
     );
   }
 
@@ -250,7 +252,7 @@ export abstract class RDD<T> {
       envDeprecated();
     }
     return this.mapPartitions(
-      sf.captureEnv(v => ah.concatArrays(v.map(v => transformer(v))), {
+      sf.captureEnv((v) => ah.concatArrays(v.map((v) => transformer(v))), {
         transformer,
         ah: sf.requireModule('@dcfjs/common/arrayHelpers'),
       }),
@@ -263,7 +265,7 @@ export abstract class RDD<T> {
       envDeprecated();
     }
     return this.mapPartitions(
-      sf.captureEnv(v => v.filter(v => filterFunc(v)), { filterFunc }),
+      sf.captureEnv((v) => v.filter((v) => filterFunc(v)), { filterFunc }),
     );
   }
 
@@ -305,19 +307,19 @@ export abstract class RDD<T> {
     return this._context.execute(
       numPartitions,
       sf.captureEnv(
-        partitionId => {
+        (partitionId) => {
           const f = partitionFunc(partitionId);
           return sf.captureEnv(
-            workerId => {
+            (workerId) => {
               return Promise.resolve(f(workerId))
-                .then(arr => {
+                .then((arr) => {
                   let content = Buffer.from(arr.join('\n'));
 
                   return compressor
                     ? Promise.resolve(compressor(content))
                     : Promise.resolve(content);
                 })
-                .then(content => {
+                .then((content) => {
                   return saveFileFunc(
                     baseUrl,
                     `part-${partitionId}.${extension}`,
@@ -376,11 +378,11 @@ export abstract class RDD<T> {
     return this._context.execute(
       numPartitions,
       sf.captureEnv(
-        partitionId => {
+        (partitionId) => {
           const f = partitionFunc(partitionId);
           return sf.captureEnv(
-            workerId => {
-              return Promise.resolve(f(workerId)).then(arr => {
+            (workerId) => {
+              return Promise.resolve(f(workerId)).then((arr) => {
                 let lastRes: T | undefined = arr[0];
 
                 for (let i = 1; i < arr.length; i++) {
@@ -401,8 +403,8 @@ export abstract class RDD<T> {
       ),
       attachFinalizedFunc(
         sf.captureEnv(
-          arr => {
-            arr = arr.filter(v => v !== undefined) as T[];
+          (arr) => {
+            arr = arr.filter((v) => v !== undefined) as T[];
             let lastRes: T | undefined = arr[0];
             for (let i = 1; i < arr.length; i++) {
               lastRes = reduceFunc(lastRes!, arr[i]!);
@@ -445,7 +447,7 @@ export abstract class RDD<T> {
       this,
       numPartitions,
       sf.captureEnv(
-        partitionId =>
+        (partitionId) =>
           sf.captureEnv(
             (data: T[]) => {
               const regrouped: T[][] = [];
@@ -491,7 +493,7 @@ export abstract class RDD<T> {
       hashPartitionFunc<T>(numPartitions),
     ).mapPartitions(
       sf.captureEnv(
-        datas => {
+        (datas) => {
           const ret = [];
           const map: { [key: string]: T } = {};
           for (const item of datas) {
@@ -596,7 +598,7 @@ export abstract class RDD<T> {
     env?: FunctionEnv,
   ): RDD<[K, V]> {
     return this.combineByKey(
-      x => x,
+      (x) => x,
       func,
       func,
       numPartitions,
@@ -726,7 +728,7 @@ export abstract class RDD<T> {
     ascending: boolean = true,
     numPartitions?: number,
   ) {
-    return this.sortBy(v => v, ascending, numPartitions);
+    return this.sortBy((v) => v, ascending, numPartitions);
   }
 
   sortBy<K extends ComparableType>(
@@ -796,7 +798,7 @@ export class MappedRDD<T1, T> extends RDD<T1> {
     return [
       numPartitions,
       sf.captureEnv(
-        partitionId => {
+        (partitionId) => {
           const f = depFunc(partitionId);
           return sf.captureEnv(
             (workerId: string) => {
@@ -851,7 +853,7 @@ export class UnionRDD<T> extends RDD<T> {
     return [
       numPartitions,
       sf.captureEnv(
-        partitionId => {
+        (partitionId) => {
           for (let i = 0; i < partitionCounts.length; i++) {
             if (partitionId < partitionCounts[i]) {
               return rddFuncs[i](partitionId);
@@ -881,10 +883,12 @@ export class UnionRDD<T> extends RDD<T> {
   }
 
   getNumPartitions() {
-    const partitionCounts = this._dependences.map(v => v.getNumPartitions());
+    const partitionCounts = this._dependences.map((v) => v.getNumPartitions());
 
-    if (partitionCounts.some(v => v instanceof Promise)) {
-      return Promise.all(partitionCounts).then(v => v.reduce((a, b) => a + b));
+    if (partitionCounts.some((v) => v instanceof Promise)) {
+      return Promise.all(partitionCounts).then((v) =>
+        v.reduce((a, b) => a + b),
+      );
     }
     return (partitionCounts as number[]).reduce((a, b) => a + b);
   }
@@ -982,7 +986,7 @@ export class CachedRDD<T> extends RDD<T> {
             depFunc,
           },
         ),
-        attachFinalizedFunc(arr => arr, depFinalizer),
+        attachFinalizedFunc((arr) => arr, depFinalizer),
       );
     }
 
@@ -992,7 +996,7 @@ export class CachedRDD<T> extends RDD<T> {
     return [
       this._cachedNumPartition!,
       sf.captureEnv(
-        partitionId => {
+        (partitionId) => {
           const partition = partitions[partitionId];
           return sf.captureEnv(
             async () => {
@@ -1131,7 +1135,7 @@ async function getRepartitionFunc<T, T1 = T>(
     ),
     attachFinalizedFunc(
       sf.captureEnv(
-        arr => {
+        (arr) => {
           // transposition matrix with new partition
           const ret: (string | null)[][] = [];
           for (let i = 0; i < numPartitions; i++) {
@@ -1154,7 +1158,7 @@ async function getRepartitionFunc<T, T1 = T>(
   return [
     numPartitions,
     sf.captureEnv(
-      partitionId => {
+      (partitionId) => {
         const partPieces = pieces[partitionId];
         // TODO: use execution context to release references.
 
@@ -1301,7 +1305,7 @@ export class SortedRDD<T, K extends ComparableType> extends RDD<T> {
     const samples = await this._context.execute(
       originPartitions,
       sf.captureEnv(
-        partitionId => {
+        (partitionId) => {
           const f = originFunc(partitionId);
 
           return sf.captureEnv(
@@ -1331,7 +1335,7 @@ export class SortedRDD<T, K extends ComparableType> extends RDD<T> {
       ),
       attachFinalizedFunc(
         sf.captureEnv(
-          arr => {
+          (arr) => {
             return ah.concatArrays(arr);
           },
           {
@@ -1461,7 +1465,7 @@ export class SortedRDD<T, K extends ComparableType> extends RDD<T> {
                 }
                 return a[3] < b[3] ? -1 : 1;
               });
-              return tmp.map(item => item[0]);
+              return tmp.map((item) => item[0]);
             },
             {
               f,
@@ -1528,7 +1532,7 @@ export class CoalesceRDD<T> extends RDD<T> {
       [originPartitions, originFunc, originFinalizer],
       numPartitions,
       sf.captureEnv(
-        partitionId => {
+        (partitionId) => {
           const arg = partitionArgs[partitionId];
           return sf.captureEnv(
             (data: T[]) => {
@@ -1592,7 +1596,7 @@ export class FileLoaderRDD extends RDD<[string, Buffer]> {
     return [
       fileList.length,
       sf.captureEnv(
-        partitionId => {
+        (partitionId) => {
           const fileName = fileList[partitionId];
           return sf.captureEnv(
             async () => {

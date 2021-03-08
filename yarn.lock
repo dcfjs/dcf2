@@ -1555,6 +1555,11 @@ isstream@~0.1.2:
   resolved "https://registry.yarnpkg.com/isstream/-/isstream-0.1.2.tgz#47e63f7af55afa6f92e1500e690eb8b8529c099a"
   integrity sha1-R+Y/evVa+m+S4VAOaQ64uFKcCZo=
 
+js-xxhash@^1.0.4:
+  version "1.0.4"
+  resolved "https://registry.npm.taobao.org/js-xxhash/download/js-xxhash-1.0.4.tgz#ce465d8a5c038167a07aa35a855c0bd792fe8e06"
+  integrity sha1-zkZdilwDgWegeqNahVwL15L+jgY=
+
 js-yaml@3.13.1:
   version "3.13.1"
   resolved "https://registry.yarnpkg.com/js-yaml/-/js-yaml-3.13.1.tgz#aff151b30bfdfa8e49e05da22e7415e9dfa37847"
@@ -1859,7 +1864,7 @@ mz@^2.7.0:
     object-assign "^4.0.1"
     thenify-all "^1.0.0"
 
-nan@^2.12.1, nan@^2.4.0:
+nan@^2.12.1:
   version "2.14.0"
   resolved "https://registry.yarnpkg.com/nan/-/nan-2.14.0.tgz#7818f722027b2459a86f0295d434d1fc2336c52c"
   integrity sha512-INOFj37C7k3AfaNTtX8RhsTw7qRy7eLET14cROi9+5HAVbbHuIWUHEauBv5qT4Av2tWasiTY1Jw6puUNqRJXQg==
@@ -3223,13 +3228,6 @@ xtend@^4.0.0:
   version "4.0.1"
   resolved "https://registry.yarnpkg.com/xtend/-/xtend-4.0.1.tgz#a5c6d532be656e23db820efb943a1f04998d63af"
   integrity sha1-pcbVMr5lbiPbgg77lDofBJmNY68=
-
-xxhash@^0.2.4:
-  version "0.2.4"
-  resolved "https://registry.yarnpkg.com/xxhash/-/xxhash-0.2.4.tgz#8b8a48162cfccc21b920fa500261187d40216c39"
-  integrity sha1-i4pIFiz8zCG5IPpQAmEYfUAhbDk=
-  dependencies:
-    nan "^2.4.0"
 
 "y18n@^3.2.1 || ^4.0.0", y18n@^4.0.0:
   version "4.0.0"

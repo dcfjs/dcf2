@@ -7,12 +7,12 @@
   "license": "MIT",
   "dependencies": {
     "@dcfjs/common": "1.0.0",
+    "@dcfjs/objpack": "latest",
     "@types/progress": "^2.0.3",
     "@types/split": "^1.0.0",
+    "js-xxhash": "^1.0.4",
     "progress": "^2.0.3",
     "split": "^1.0.1",
-    "tslib": "^1.9.3",
-    "xxhash": "^0.2.4",
-    "@dcfjs/objpack": "latest"
+    "tslib": "^1.9.3"
   }
 }
