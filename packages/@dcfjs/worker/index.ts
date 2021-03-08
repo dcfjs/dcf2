@@ -76,7 +76,11 @@ export async function createWorkerServer(
         throw new ServerBadRequestError('Only master can execute scripts.');
       }
       const f = deserializeFunction(func);
-      return f(workerId);
+      const ret = f(workerId);
+      if (global.gc) {
+        global.gc();
+      }
+      return ret;
     },
   };
 
@@ -127,7 +131,7 @@ export async function createLocalWorker(masterEndpoint: string) {
   return (): Promise<void> => {
     debug('Killing child process');
     cp.kill('SIGTERM');
-    return new Promise(resolve => {
+    return new Promise((resolve) => {
       cp.on('exit', (code, signal) => {
         resolve();
       });
