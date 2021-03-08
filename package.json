@@ -4,6 +4,7 @@
     "packages/@dcfjs/*"
   ],
   "scripts": {
+    "build": "tsc",
     "watch:tsc": "tsc -w",
     "test:all": "mocha --require @dcfjs/common/registerCaptureEnv test/**/*.js",
     "test": "mocha --require @dcfjs/common/registerCaptureEnv"
