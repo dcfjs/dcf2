@@ -27,7 +27,7 @@ const idleList: ClientWorker[] = [];
 type Work<T> = [
   SerializedFunction<() => T>,
   (result: T) => void,
-  (reason: any) => void
+  (reason: any) => void,
 ];
 const pendingList: Work<any>[] = [];
 
@@ -94,7 +94,7 @@ class ClientWorker {
         idleList[this.idleListPos] = tmp;
         tmp.idleListPos = this.idleListPos;
       }
-      this.workerListPos = null;
+      this.idleListPos = null;
     }
   }
 
@@ -110,7 +110,7 @@ class ClientWorker {
       () => {
         this._becomeIdle();
       },
-      e => {
+      (e) => {
         console.warn(e);
         this._becomeIdle();
       },

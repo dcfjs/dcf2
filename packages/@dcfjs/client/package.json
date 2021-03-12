@@ -6,8 +6,8 @@
   "author": "dengyun <dengyun@meideng.net>",
   "license": "MIT",
   "dependencies": {
-    "@dcfjs/common": "1.0.0",
-    "@dcfjs/objpack": "latest",
+    "@dcfjs/common": "^1.0.1",
+    "@dcfjs/objpack": "^1.0.1",
     "@types/progress": "^2.0.3",
     "@types/split": "^1.0.0",
     "js-xxhash": "^1.0.4",
