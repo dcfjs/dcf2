@@ -1,12 +1,12 @@
 {
   "name": "@dcfjs/client",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "main": "index.js",
   "repository": "git@github.com:dcfjs/dcf.git",
   "author": "dengyun <dengyun@meideng.net>",
   "license": "MIT",
   "dependencies": {
-    "@dcfjs/common": "^1.0.1",
+    "@dcfjs/common": "^1.0.2",
     "@dcfjs/objpack": "^1.0.1",
     "@types/progress": "^2.0.3",
     "@types/split": "^1.0.0",

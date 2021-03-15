@@ -1,5 +1,7 @@
 {
-  "packages": ["packages/@dcfjs/*"],
-  "version": "1.0.1",
+  "packages": [
+    "packages/@dcfjs/*"
+  ],
+  "version": "1.0.2",
   "npmClient": "yarn"
 }

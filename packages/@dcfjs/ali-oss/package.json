@@ -1,14 +1,14 @@
 {
   "name": "@dcfjs/ali-oss",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "main": "index.js",
   "repository": "git@github.com:dcfjs/dcf.git",
   "author": "dengyun <dengyun@meideng.net>",
   "license": "MIT",
   "dependencies": {
-    "tslib": "^1.9.3",
-    "@dcfjs/common": "^1.0.1",
+    "@dcfjs/client": "^1.0.2",
+    "@dcfjs/common": "^1.0.2",
     "ali-oss": "^6.1.1",
-    "@dcfjs/client": "^1.0.1"
+    "tslib": "^1.9.3"
   }
 }
