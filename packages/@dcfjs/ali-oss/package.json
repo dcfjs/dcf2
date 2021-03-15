@@ -7,8 +7,8 @@
   "license": "MIT",
   "dependencies": {
     "tslib": "^1.9.3",
-    "@dcfjs/common": "1.0.0",
+    "@dcfjs/common": "^1.0.1",
     "ali-oss": "^6.1.1",
-    "@dcfjs/client": "1.0.0"
+    "@dcfjs/client": "^1.0.1"
   }
 }
