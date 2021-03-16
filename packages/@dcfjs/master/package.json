@@ -1,6 +1,6 @@
 {
   "name": "@dcfjs/master",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "main": "index.js",
   "repository": "git@github.com:dcfjs/dcf.git",
   "author": "dengyun <dengyun@meideng.net>",
@@ -9,7 +9,7 @@
     "dcf-master": "./cli.js"
   },
   "dependencies": {
-    "@dcfjs/common": "^1.0.2",
+    "@dcfjs/common": "^1.0.3",
     "@types/debug": "^4.1.4",
     "debug": "^4.1.1",
     "tslib": "^1.9.3"

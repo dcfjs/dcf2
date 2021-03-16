@@ -6,7 +6,7 @@
   "author": "dengyun <dengyun@meideng.net>",
   "license": "MIT",
   "dependencies": {
-    "@dcfjs/common": "^1.0.2",
+    "@dcfjs/common": "^1.0.3",
     "@dcfjs/objpack": "^1.0.1",
     "@types/progress": "^2.0.3",
     "@types/split": "^1.0.0",
