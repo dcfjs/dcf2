@@ -1,4 +1,3 @@
-import { FinalizedFunc } from './RDD';
 import '@dcfjs/common/noCaptureEnv';
 import { ExecTask } from './../master/index';
 import { FunctionEnv } from './../common/serializeFunction';
@@ -35,7 +34,7 @@ function hashPartitionFunc<V>(numPartitions: number) {
   const seed = ((Math.random() * 0xffffffff) | 0) >>> 0;
   return sf.captureEnv(
     (data: V) => {
-      return XXHash.hash(pack.encode(data), seed) % numPartitions;
+      return XXHash.xxHash32(pack.encode(data), seed) % numPartitions;
     },
     {
       numPartitions,
